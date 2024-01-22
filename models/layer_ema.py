@@ -1,32 +1,37 @@
 import torch.nn as nn
 
 
-class EMAHelper(object):
+class LayerEMAHelper(object):
     def __init__(self, mu=0.999):
         self.mu = mu
-        self.shadow = {}
+        self.shadows = []
 
     def register(self, module):
         if isinstance(module, nn.DataParallel):
             module = module.module
-        for name, param in module.named_parameters():
-            if param.requires_grad:
-                self.shadow[name] = param.data.clone()
+        
+        for block in module.models:
+            shadow = {}
+            for name, param in block.named_parameters():
+                if param.requires_grad:
+                    shadow[name] = param.data.clone()
+            self.shadows.append(shadow)
 
-    def update(self, module):
+    def update(self, module, t):
         if isinstance(module, nn.DataParallel):
             module = module.module
-        for name, param in module.named_parameters():
+        for name, param in module[t].named_parameters():
             if param.requires_grad:
-                self.shadow[name].data = (
-                    1. - self.mu) * param.data + self.mu * self.shadow[name].data
+                self.shadows[t // module.skip][name].data = (
+                    1. - self.mu) * param.data + self.mu * self.shadows[t // module.skip][name].data
 
     def ema(self, module):
         if isinstance(module, nn.DataParallel):
             module = module.module
-        for name, param in module.named_parameters():
-            if param.requires_grad:
-                param.data.copy_(self.shadow[name].data)
+        for i, block in enumerate(module.models):
+            for name, param in block.named_parameters():
+                if param.requires_grad:
+                    param.data.copy_(self.shadows[i][name].data)
 
     def ema_copy(self, module):
         if isinstance(module, nn.DataParallel):
@@ -43,7 +48,7 @@ class EMAHelper(object):
         return module_copy
 
     def state_dict(self):
-        return self.shadow
+        return self.shadows
 
     def load_state_dict(self, state_dict):
-        self.shadow = state_dict
+        self.shadows = state_dict

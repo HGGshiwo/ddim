@@ -8,15 +8,17 @@ import tqdm
 import torch
 import torch.utils.data as data
 
-from models.diffusion import Model
+from models.model import Model
 from models.ema import EMAHelper
+from models.layer_ema import LayerEMAHelper
 from functions import get_optimizer
-from functions.losses import loss_registry
+from functions.losses import end2end_loss, layer_loss
 from datasets import get_dataset, data_transform, inverse_data_transform
 from functions.ckpt_util import get_ckpt_path
-
-import torchvision.utils as tvu
-
+from score.both import get_inception_and_fid_score
+from torchvision.utils import make_grid, save_image
+import random
+from tqdm import trange
 
 def torch2hwcuint8(x, clip=False):
     if clip:
@@ -105,15 +107,20 @@ class Diffusion(object):
             shuffle=True,
             num_workers=config.data.num_workers,
         )
-        model = Model(config)
+        model = Model(config, self.betas)
 
         model = model.to(self.device)
-        model = torch.nn.DataParallel(model)
+        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
+        logging.info(f"param: {total_params}")
+        # model = torch.nn.DataParallel(model)
 
         optimizer = get_optimizer(self.config, model.parameters())
 
         if self.config.model.ema:
-            ema_helper = EMAHelper(mu=self.config.model.ema_rate)
+            if self.config.training.train_type == "layer":
+                ema_helper = LayerEMAHelper(mu=self.config.model.ema_rate)
+            else:
+                ema_helper = EMAHelper(mu=self.config.model.ema_rate)
             ema_helper.register(model)
         else:
             ema_helper = None
@@ -130,46 +137,59 @@ class Diffusion(object):
             if self.config.model.ema:
                 ema_helper.load_state_dict(states[4])
 
+        t_index = 0 if self.config.training.train_type == "layer" else "all"
+        model.train()  
+        
+        skip = self.num_timesteps // self.args.timesteps
+        seq = range(0, self.num_timesteps, skip)
+
         for epoch in range(start_epoch, self.config.training.n_epochs):
             data_start = time.time()
             data_time = 0
             for i, (x, y) in enumerate(train_loader):
                 n = x.size(0)
                 data_time += time.time() - data_start
-                model.train()
+                
                 step += 1
 
                 x = x.to(self.device)
                 x = data_transform(self.config, x)
-                e = torch.randn_like(x)
-                b = self.betas
-
-                # antithetic sampling
-                t = torch.randint(
-                    low=0, high=self.num_timesteps, size=(n // 2 + 1,)
-                ).to(self.device)
-                t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
-                loss = loss_registry[config.model.type](model, x, t, e, b)
-
-                tb_logger.add_scalar("loss", loss, global_step=step)
-
+                x_T = torch.randn_like(x)
+                
+                if self.config.training.train_type == "end2end":
+                    loss = end2end_loss(model, x, x_T)                
+                else:
+                    t_index = t_index % len(seq)
+                    t = seq[t_index]
+                    loss = layer_loss(model, x, t, x_T, self.betas)
+                
+                tb_logger.add_scalar(f"layer{t_index}/loss", loss, global_step=step)
                 logging.info(
-                    f"step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                    f"epoch: {epoch} layer: {t_index} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
                 )
+                if self.config.training.train_type == "layer":
+                    t_index += 1
 
                 optimizer.zero_grad()
                 loss.backward()
 
-                try:
+           
+                if self.config.training.train_type == "end2end":
                     torch.nn.utils.clip_grad_norm_(
                         model.parameters(), config.optim.grad_clip
                     )
-                except Exception:
-                    pass
+                else:
+                    torch.nn.utils.clip_grad_norm_(
+                        model[t].parameters(), config.optim.grad_clip
+                    )
+     
                 optimizer.step()
 
                 if self.config.model.ema:
-                    ema_helper.update(model)
+                    if self.config.training.train_type == "layer":
+                        ema_helper.update(model, t)
+                    else:
+                        ema_helper.update(model)
 
                 if step % self.config.training.snapshot_freq == 0 or step == 1:
                     states = [
@@ -189,92 +209,45 @@ class Diffusion(object):
 
                 data_start = time.time()
 
-    def sample(self):
-        model = Model(self.config)
-
-        if not self.args.use_pretrained:
-            if getattr(self.config.sampling, "ckpt_id", None) is None:
-                states = torch.load(
-                    os.path.join(self.args.log_path, "ckpt.pth"),
-                    map_location=self.config.device,
-                )
-            else:
-                states = torch.load(
-                    os.path.join(
-                        self.args.log_path, f"ckpt_{self.config.sampling.ckpt_id}.pth"
-                    ),
-                    map_location=self.config.device,
-                )
-            model = model.to(self.device)
-            model = torch.nn.DataParallel(model)
-            model.load_state_dict(states[0], strict=True)
-
-            if self.config.model.ema:
-                ema_helper = EMAHelper(mu=self.config.model.ema_rate)
-                ema_helper.register(model)
-                ema_helper.load_state_dict(states[-1])
-                ema_helper.ema(model)
-            else:
-                ema_helper = None
+    def get_model(self):
+        model = Model(self.config, self.betas)
+        if getattr(self.config.sampling, "ckpt_id", None) is None:
+            states = torch.load(
+                os.path.join(self.args.log_path, "ckpt.pth"),
+                map_location=self.config.device,
+            )
         else:
-            # This used the pretrained DDPM model, see https://github.com/pesser/pytorch_diffusion
-            if self.config.data.dataset == "CIFAR10":
-                name = "cifar10"
-            elif self.config.data.dataset == "LSUN":
-                name = f"lsun_{self.config.data.category}"
-            else:
-                raise ValueError
-            ckpt = get_ckpt_path(f"ema_{name}")
-            print("Loading checkpoint {}".format(ckpt))
-            model.load_state_dict(torch.load(ckpt, map_location=self.device))
-            model.to(self.device)
-            model = torch.nn.DataParallel(model)
+            states = torch.load(
+                os.path.join(
+                    self.args.log_path, f"ckpt_{self.config.sampling.ckpt_id}.pth"
+                ),
+                map_location=self.config.device,
+            )
+        model = model.to(self.device)
+        # model = torch.nn.DataParallel(model)
+        model.load_state_dict(states[0], strict=True)
 
+        if self.config.model.ema:
+            if self.config.training.train_type == "layer":
+                ema_helper = LayerEMAHelper(mu=self.config.model.ema_rate)
+            else:
+                ema_helper = EMAHelper(mu=self.config.model.ema_rate)
+            ema_helper.register(model)
+            ema_helper.load_state_dict(states[-1])
+            ema_helper.ema(model)
+        else:
+            ema_helper = None
+        return model
+    
+    def sample(self):
+        
+        model = self.get_model()
         model.eval()
 
-        if self.args.fid:
-            self.sample_fid(model)
-        elif self.args.interpolation:
-            self.sample_interpolation(model)
-        elif self.args.sequence:
-            self.sample_sequence(model)
-        else:
-            raise NotImplementedError("Sample procedeure not defined")
-
-    def sample_fid(self, model):
-        config = self.config
-        img_id = len(glob.glob(f"{self.args.image_folder}/*"))
-        print(f"starting from image {img_id}")
-        total_n_samples = 50000
-        n_rounds = (total_n_samples - img_id) // config.sampling.batch_size
-
-        with torch.no_grad():
-            for _ in tqdm.tqdm(
-                range(n_rounds), desc="Generating image samples for FID evaluation."
-            ):
-                n = config.sampling.batch_size
-                x = torch.randn(
-                    n,
-                    config.data.channels,
-                    config.data.image_size,
-                    config.data.image_size,
-                    device=self.device,
-                )
-
-                x = self.sample_image(x, model)
-                x = inverse_data_transform(config, x)
-
-                for i in range(n):
-                    tvu.save_image(
-                        x[i], os.path.join(self.args.image_folder, f"{img_id}.png")
-                    )
-                    img_id += 1
-
-    def sample_sequence(self, model):
         config = self.config
 
         x = torch.randn(
-            8,
+            config.sampling.batch_size,
             config.data.channels,
             config.data.image_size,
             config.data.image_size,
@@ -283,102 +256,27 @@ class Diffusion(object):
 
         # NOTE: This means that we are producing each predicted x0, not x_{t-1} at timestep t.
         with torch.no_grad():
-            _, x = self.sample_image(x, model, last=False)
+            x = model.sample(x)
 
-        x = [inverse_data_transform(config, y) for y in x]
-
-        for i in range(len(x)):
-            for j in range(x[i].size(0)):
-                tvu.save_image(
-                    x[i][j], os.path.join(self.args.image_folder, f"{j}_{i}.png")
-                )
-
-    def sample_interpolation(self, model):
-        config = self.config
-
-        def slerp(z1, z2, alpha):
-            theta = torch.acos(torch.sum(z1 * z2) / (torch.norm(z1) * torch.norm(z2)))
-            return (
-                torch.sin((1 - alpha) * theta) / torch.sin(theta) * z1
-                + torch.sin(alpha * theta) / torch.sin(theta) * z2
-            )
-
-        z1 = torch.randn(
-            1,
-            config.data.channels,
-            config.data.image_size,
-            config.data.image_size,
-            device=self.device,
-        )
-        z2 = torch.randn(
-            1,
-            config.data.channels,
-            config.data.image_size,
-            config.data.image_size,
-            device=self.device,
-        )
-        alpha = torch.arange(0.0, 1.01, 0.1).to(z1.device)
-        z_ = []
-        for i in range(alpha.size(0)):
-            z_.append(slerp(z1, z2, alpha[i]))
-
-        x = torch.cat(z_, dim=0)
-        xs = []
-
-        # Hard coded here, modify to your preferences
+        x = inverse_data_transform(config, x)
+        save_image(x, os.path.join(self.args.image_folder, f"sample.png"), nrow=16)
+            
+    def eval(self):
+        model = self.get_model()
+        model.eval()
+        config = self.config.eval
         with torch.no_grad():
-            for i in range(0, x.size(0), 8):
-                xs.append(self.sample_image(x[i : i + 8], model))
-        x = inverse_data_transform(config, torch.cat(xs, dim=0))
-        for i in range(x.size(0)):
-            tvu.save_image(x[i], os.path.join(self.args.image_folder, f"{i}.png"))
-
-    def sample_image(self, x, model, last=True):
-        try:
-            skip = self.args.skip
-        except Exception:
-            skip = 1
-
-        if self.args.sample_type == "generalized":
-            if self.args.skip_type == "uniform":
-                skip = self.num_timesteps // self.args.timesteps
-                seq = range(0, self.num_timesteps, skip)
-            elif self.args.skip_type == "quad":
-                seq = (
-                    np.linspace(
-                        0, np.sqrt(self.num_timesteps * 0.8), self.args.timesteps
-                    )
-                    ** 2
-                )
-                seq = [int(s) for s in list(seq)]
-            else:
-                raise NotImplementedError
-            from functions.denoising import generalized_steps
-
-            xs = generalized_steps(x, seq, model, self.betas, eta=self.args.eta)
-            x = xs
-        elif self.args.sample_type == "ddpm_noisy":
-            if self.args.skip_type == "uniform":
-                skip = self.num_timesteps // self.args.timesteps
-                seq = range(0, self.num_timesteps, skip)
-            elif self.args.skip_type == "quad":
-                seq = (
-                    np.linspace(
-                        0, np.sqrt(self.num_timesteps * 0.8), self.args.timesteps
-                    )
-                    ** 2
-                )
-                seq = [int(s) for s in list(seq)]
-            else:
-                raise NotImplementedError
-            from functions.denoising import ddpm_steps
-
-            x = ddpm_steps(x, seq, model, self.betas)
-        else:
-            raise NotImplementedError
-        if last:
-            x = x[0][-1]
-        return x
-
-    def test(self):
-        pass
+            images = []
+            desc = "generating images"
+            for i in trange(0, config.num_images, config.batch_size, desc=desc):
+                batch_size = min(config.batch_size, config.num_images - i)
+                x_T = torch.randn((batch_size, 3, self.config.data.image_size, self.config.data.image_size), device=self.device)
+                batch_images = model.sample(x_T).cpu()
+                images.append((batch_images + 1) / 2)
+            images = torch.cat(images, dim=0).numpy()
+    
+        (IS, IS_std), FID = get_inception_and_fid_score(
+            images, config.fid_cache, num_images=config.num_images,
+            use_torch=config.fid_use_torch, verbose=True)
+        
+        print("Model(EMA): IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))

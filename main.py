@@ -8,11 +8,13 @@ import os
 import torch
 import numpy as np
 import torch.utils.tensorboard as tb
+import datetime
 
 from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
-
+import os  
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"  
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
@@ -27,7 +29,7 @@ def parse_args_and_config():
     parser.add_argument(
         "--doc",
         type=str,
-        required=True,
+        default=None,
         help="A string for documentation purpose. "
         "Will be the name of the log folder.",
     )
@@ -40,7 +42,7 @@ def parse_args_and_config():
         default="info",
         help="Verbose level: info | debug | warning | critical",
     )
-    parser.add_argument("--test", action="store_true", help="Whether to test the model")
+    parser.add_argument("--eval", action="store_true", help="Whether to test the model")
     parser.add_argument(
         "--sample",
         action="store_true",
@@ -55,7 +57,7 @@ def parse_args_and_config():
         "-i",
         "--image_folder",
         type=str,
-        default="images",
+        default=None,
         help="The folder name of samples",
     )
     parser.add_argument(
@@ -76,9 +78,9 @@ def parse_args_and_config():
         default="uniform",
         help="skip according to (uniform or quadratic)",
     )
-    parser.add_argument(
-        "--timesteps", type=int, default=1000, help="number of steps involved"
-    )
+    # parser.add_argument(
+    #     "--timesteps", type=int, default=10, help="number of steps involved"
+    # )
     parser.add_argument(
         "--eta",
         type=float,
@@ -88,37 +90,22 @@ def parse_args_and_config():
     parser.add_argument("--sequence", action="store_true")
 
     args = parser.parse_args()
+    
+    if args.doc is None:
+        args.doc = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     args.log_path = os.path.join(args.exp, "logs", args.doc)
 
     # parse config file
     with open(os.path.join("configs", args.config), "r") as f:
         config = yaml.safe_load(f)
     new_config = dict2namespace(config)
+    args.timesteps = len(new_config.model.ch_num)
 
     tb_path = os.path.join(args.exp, "tensorboard", args.doc)
 
-    if not args.test and not args.sample:
+    if not args.eval and not args.sample:
         if not args.resume_training:
-            if os.path.exists(args.log_path):
-                overwrite = False
-                if args.ni:
-                    overwrite = True
-                else:
-                    response = input("Folder already exists. Overwrite? (Y/N)")
-                    if response.upper() == "Y":
-                        overwrite = True
-
-                if overwrite:
-                    shutil.rmtree(args.log_path)
-                    shutil.rmtree(tb_path)
-                    os.makedirs(args.log_path)
-                    if os.path.exists(tb_path):
-                        shutil.rmtree(tb_path)
-                else:
-                    print("Folder exists. Program halted.")
-                    sys.exit(0)
-            else:
-                os.makedirs(args.log_path)
+            os.makedirs(args.log_path)
 
             with open(os.path.join(args.log_path, "config.yml"), "w") as f:
                 yaml.dump(new_config, f, default_flow_style=False)
@@ -157,29 +144,13 @@ def parse_args_and_config():
 
         if args.sample:
             os.makedirs(os.path.join(args.exp, "image_samples"), exist_ok=True)
+            if args.image_folder is None:
+                args.image_folder = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
             args.image_folder = os.path.join(
                 args.exp, "image_samples", args.image_folder
             )
             if not os.path.exists(args.image_folder):
                 os.makedirs(args.image_folder)
-            else:
-                if not (args.fid or args.interpolation):
-                    overwrite = False
-                    if args.ni:
-                        overwrite = True
-                    else:
-                        response = input(
-                            f"Image folder {args.image_folder} already exists. Overwrite? (Y/N)"
-                        )
-                        if response.upper() == "Y":
-                            overwrite = True
-
-                    if overwrite:
-                        shutil.rmtree(args.image_folder)
-                        os.makedirs(args.image_folder)
-                    else:
-                        print("Output image folder exists. Program halted.")
-                        sys.exit(0)
 
     # add device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -213,13 +184,13 @@ def main():
     logging.info("Writing log file to {}".format(args.log_path))
     logging.info("Exp instance id = {}".format(os.getpid()))
     logging.info("Exp comment = {}".format(args.comment))
-
+    
     try:
         runner = Diffusion(args, config)
         if args.sample:
             runner.sample()
-        elif args.test:
-            runner.test()
+        elif args.eval:
+            runner.eval()
         else:
             runner.train()
     except Exception:
