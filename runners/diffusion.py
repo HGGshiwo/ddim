@@ -9,6 +9,7 @@ import torch
 import torch.utils.data as data
 
 from models.model import Model
+from models.diffusion import Model as UNet
 from models.ema import EMAHelper
 from models.layer_ema import LayerEMAHelper
 from functions import get_optimizer
@@ -280,3 +281,39 @@ class Diffusion(object):
             use_torch=config.fid_use_torch, verbose=True)
         
         print("Model(EMA): IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
+
+    def pre_train(self):
+        args, config = self.args, self.config
+        dataset, test_dataset = get_dataset(args, config)
+        train_loader = data.DataLoader(
+            dataset,
+            batch_size=config.training.batch_size,
+            shuffle=True,
+            num_workers=config.data.num_workers,
+        )
+        model = UNet(config) 
+        states = torch.load(
+            os.path.join("exp", f"model-790000.ckpt"),
+            map_location=self.config.device,
+        )
+        model.load_state_dict(states, strict=True)
+        model = model.to(self.device)
+
+        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
+        logging.info(f"param: {total_params}")
+       
+        t = 0
+        skip = self.num_timesteps // self.args.timesteps
+        seq = range(0, self.num_timesteps, skip)
+        t_index = 0
+        for i, (x, y) in enumerate(train_loader):
+            if t_index >= len(seq):
+                break
+            t = seq[t_index] * torch.ones(x.size(0), device=self.device, dtype=torch.long)
+            x = x.to(self.device)
+            x = data_transform(self.config, x)
+            x_T = torch.randn_like(x)
+            loss = layer_loss(model, x, t, x_T, self.betas)
+            print(f"layer {t_index} loss: {loss.item()}")
+            t_index += 1
+            

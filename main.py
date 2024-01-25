@@ -87,8 +87,7 @@ def parse_args_and_config():
         default=0.0,
         help="eta used to control the variances of sigma",
     )
-    parser.add_argument("--sequence", action="store_true")
-
+    parser.add_argument("--pre_train", action="store_true")
     args = parser.parse_args()
     
     if args.doc is None:
@@ -99,11 +98,14 @@ def parse_args_and_config():
     with open(os.path.join("configs", args.config), "r") as f:
         config = yaml.safe_load(f)
     new_config = dict2namespace(config)
-    args.timesteps = len(new_config.model.ch_num)
+    try:
+        args.timesteps = len(new_config.model.ch_num)
+    except:
+        args.timesteps = 10
 
     tb_path = os.path.join(args.exp, "tensorboard", args.doc)
 
-    if not args.eval and not args.sample:
+    if not args.eval and not args.sample and not args.pre_train:
         if not args.resume_training:
             os.makedirs(args.log_path)
 
@@ -191,6 +193,8 @@ def main():
             runner.sample()
         elif args.eval:
             runner.eval()
+        elif args.pre_train:
+            runner.pre_train()
         else:
             runner.train()
     except Exception:
