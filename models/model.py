@@ -177,7 +177,6 @@ class AttnBlock(nn.Module):
 class ModelBlock(nn.Module):
     def __init__(self, config, ch):
         super().__init__()
-        self.config = config
         out_ch, ch_mult = config.model.out_ch, tuple(config.model.ch_mult)
         num_res_blocks = config.model.num_res_blocks
         attn_resolutions = config.model.attn_resolutions
@@ -306,31 +305,30 @@ class ModelBlock(nn.Module):
         return h
 
 class Model(nn.Module):
-    def __init__(self, config, betas):
+    def __init__(self, config, betas, seq):
         super().__init__()
         timesteps = len(config.model.ch_num)
-        self.models = nn.ModuleList([
-            ModelBlock(config, ch) for ch in config.model.ch_num
-        ])
-        self.skip = config.diffusion.num_diffusion_timesteps // timesteps
-        self.seq = list(range(0, config.diffusion.num_diffusion_timesteps, self.skip))
-        self.t = None
+        assert len(seq) == len(config.model.ch_num)
+        self.models = nn.ModuleDict({
+            str(key): ModelBlock(config, ch) 
+            for key, ch in zip(seq, config.model.ch_num)
+        })
+        self.seq = seq
         self.betas = betas
         pass
     
     def forward(self, x, t):
-        et = self.models[t // self.skip](x)
+        et = self.models[str(t)](x)
         return et
 
     def __getitem__(self, i):
-        return self.models[i // self.skip]
+        return self.models[str(i)]
     
     def sample(self, x):
         kwargs = {}
         n = x.size(0)
         betas = self.betas
-        seq = self.seq
-        # seq_next = [-1] + self.seq[:-1]
+        seq = self.seq[1:]
         seq_next = self.seq[:-1]
         for i, j in zip(reversed(seq), reversed(seq_next)):
             h = x

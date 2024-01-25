@@ -42,30 +42,21 @@ def parse_args_and_config():
         default="info",
         help="Verbose level: info | debug | warning | critical",
     )
-    parser.add_argument("--eval", action="store_true", help="Whether to test the model")
+    parser.add_argument("--loss", action="store_true", help="Whether to test the model")
+    parser.add_argument("--fid", action="store_true", help="Whether to test the model")
     parser.add_argument(
         "--sample",
         action="store_true",
         help="Whether to produce samples from the model",
     )
-    parser.add_argument("--fid", action="store_true")
-    parser.add_argument("--interpolation", action="store_true")
     parser.add_argument(
         "--resume_training", action="store_true", help="Whether to resume training"
-    )
-    parser.add_argument(
-        "-i",
-        "--image_folder",
-        type=str,
-        default=None,
-        help="The folder name of samples",
     )
     parser.add_argument(
         "--ni",
         action="store_true",
         help="No interaction. Suitable for Slurm Job launcher",
     )
-    parser.add_argument("--use_pretrained", action="store_true")
     parser.add_argument(
         "--sample_type",
         type=str,
@@ -78,16 +69,12 @@ def parse_args_and_config():
         default="uniform",
         help="skip according to (uniform or quadratic)",
     )
-    # parser.add_argument(
-    #     "--timesteps", type=int, default=10, help="number of steps involved"
-    # )
     parser.add_argument(
         "--eta",
         type=float,
         default=0.0,
         help="eta used to control the variances of sigma",
     )
-    parser.add_argument("--pre_train", action="store_true")
     args = parser.parse_args()
     
     if args.doc is None:
@@ -105,7 +92,8 @@ def parse_args_and_config():
 
     tb_path = os.path.join(args.exp, "tensorboard", args.doc)
 
-    if not args.eval and not args.sample and not args.pre_train:
+    args.train = not args.sample and not args.loss and not args.fid 
+    if args.train:
         if not args.resume_training:
             os.makedirs(args.log_path)
 
@@ -146,8 +134,7 @@ def parse_args_and_config():
 
         if args.sample:
             os.makedirs(os.path.join(args.exp, "image_samples"), exist_ok=True)
-            if args.image_folder is None:
-                args.image_folder = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            args.image_folder = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
             args.image_folder = os.path.join(
                 args.exp, "image_samples", args.image_folder
             )
@@ -191,10 +178,10 @@ def main():
         runner = Diffusion(args, config)
         if args.sample:
             runner.sample()
-        elif args.eval:
-            runner.eval()
-        elif args.pre_train:
-            runner.pre_train()
+        elif args.loss:
+            runner.loss()
+        elif args.fid:
+            runner.fid()
         else:
             runner.train()
     except Exception:

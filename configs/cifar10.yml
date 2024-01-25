@@ -1,3 +1,4 @@
+use_pretrained: true
 data:
     dataset: "CIFAR10"
     image_size: 32
@@ -37,8 +38,7 @@ training:
     validation_freq: 2000
 
 sampling:
-    batch_size: 64
-    last_only: True
+    batch_size: 256
 
 optim:
     weight_decay: 0.000
@@ -48,3 +48,9 @@ optim:
     amsgrad: false
     eps: 0.00000001
     grad_clip: 1.0
+
+eval:
+    num_images: 50000
+    batch_size: 128
+    fid_cache: /home/bingwenzhang/ddim/stats/cifar10.train.npz
+    fid_use_torch: false

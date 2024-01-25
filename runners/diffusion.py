@@ -10,8 +10,7 @@ import torch.utils.data as data
 
 from models.model import Model
 from models.diffusion import Model as UNet
-from models.ema import EMAHelper
-from models.layer_ema import LayerEMAHelper
+from models.model_ema import ModelEma
 from functions import get_optimizer
 from functions.losses import end2end_loss, layer_loss
 from datasets import get_dataset, data_transform, inverse_data_transform
@@ -98,6 +97,41 @@ class Diffusion(object):
         elif self.model_var_type == "fixedsmall":
             self.logvar = posterior_variance.clamp(min=1e-20).log()
 
+        skip = self.num_timesteps // self.args.timesteps
+        self.seq = range(0, self.num_timesteps, skip)
+
+    def create_model(self):
+        if self.config.use_pretrained:
+            model = UNet(self.config.model, self.betas, self.seq) 
+            states = torch.load(
+                os.path.join("exp", f"model-790000.ckpt"),
+                map_location=self.config.device,
+            )
+            model.load_state_dict(states, strict=True)
+            model = model.to(self.device)
+            ema = ModelEma(model, decay=self.config.model.ema_rate)
+        else:
+            model = Model(self.config, self.betas, self.seq)
+            if not self.args.train:
+                states = torch.load(
+                    os.path.join(self.args.log_path, "ckpt"),
+                    map_location=self.config.device,
+                )
+                model.load_state_dict(states[0], strict=True)
+            
+            model = model.to(self.device)
+            if self.config.model.ema:
+                ema = ModelEma(model, decay=self.config.model.ema_rate)
+                if not self.args.train:
+                    ema.load_state_dict(states[-1])
+            else:
+                ema = None
+        
+        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
+        logging.info(f"param: {total_params}")
+
+        return model, ema
+
     def train(self):
         args, config = self.args, self.config
         tb_logger = self.config.tb_logger
@@ -108,23 +142,8 @@ class Diffusion(object):
             shuffle=True,
             num_workers=config.data.num_workers,
         )
-        model = Model(config, self.betas)
-
-        model = model.to(self.device)
-        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
-        logging.info(f"param: {total_params}")
-        # model = torch.nn.DataParallel(model)
-
+        model, ema = self.create_model()
         optimizer = get_optimizer(self.config, model.parameters())
-
-        if self.config.model.ema:
-            if self.config.training.train_type == "layer":
-                ema_helper = LayerEMAHelper(mu=self.config.model.ema_rate)
-            else:
-                ema_helper = EMAHelper(mu=self.config.model.ema_rate)
-            ema_helper.register(model)
-        else:
-            ema_helper = None
 
         start_epoch, step = 0, 0
         if self.args.resume_training:
@@ -136,15 +155,14 @@ class Diffusion(object):
             start_epoch = states[2]
             step = states[3]
             if self.config.model.ema:
-                ema_helper.load_state_dict(states[4])
+                ema.load_state_dict(states[4])
 
-        t_index = 0 if self.config.training.train_type == "layer" else "all"
-        model.train()  
-        
-        skip = self.num_timesteps // self.args.timesteps
-        seq = range(0, self.num_timesteps, skip)
+        t_index = 0
 
         for epoch in range(start_epoch, self.config.training.n_epochs):
+            
+            model.train()  
+            
             data_start = time.time()
             data_time = 0
             for i, (x, y) in enumerate(train_loader):
@@ -160,21 +178,25 @@ class Diffusion(object):
                 if self.config.training.train_type == "end2end":
                     loss = end2end_loss(model, x, x_T)                
                 else:
-                    t_index = t_index % len(seq)
-                    t = seq[t_index]
+                    t_index = t_index % len(self.seq)
+                    t = self.seq[t_index]
                     loss = layer_loss(model, x, t, x_T, self.betas)
                 
-                tb_logger.add_scalar(f"layer{t_index}/loss", loss, global_step=step)
-                logging.info(
-                    f"epoch: {epoch} layer: {t_index} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
-                )
                 if self.config.training.train_type == "layer":
-                    t_index += 1
-
+                    tb_logger.add_scalar(f"layer{t_index}/loss", loss, global_step=step)
+                    logging.info(
+                        f"epoch: {epoch} layer: {t_index} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                    )
+                else:
+                    tb_logger.add_scalar(f"loss", loss, global_step=step)
+                    logging.info(
+                        f"epoch: {epoch} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                    )
+                t_index += 1
+                
                 optimizer.zero_grad()
                 loss.backward()
 
-           
                 if self.config.training.train_type == "end2end":
                     torch.nn.utils.clip_grad_norm_(
                         model.parameters(), config.optim.grad_clip
@@ -188,11 +210,16 @@ class Diffusion(object):
 
                 if self.config.model.ema:
                     if self.config.training.train_type == "layer":
-                        ema_helper.update(model, t)
+                        ema.update(model, t)
                     else:
-                        ema_helper.update(model)
+                        ema.update(model)
+                
+                if step % self.config.training.sample_freq == 0:
+                    model.eval()
+                    path = os.path.join(self.args.log_path, '%d.png' % step)
+                    save_image(grid, path)
 
-                if step % self.config.training.snapshot_freq == 0 or step == 1:
+                if step % self.config.training.snapshot_freq == 0:
                     states = [
                         model.state_dict(),
                         optimizer.state_dict(),
@@ -200,7 +227,7 @@ class Diffusion(object):
                         step,
                     ]
                     if self.config.model.ema:
-                        states.append(ema_helper.state_dict())
+                        states.append(ema.state_dict())
 
                     torch.save(
                         states,
@@ -209,44 +236,14 @@ class Diffusion(object):
                     torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
 
                 data_start = time.time()
-
-    def get_model(self):
-        model = Model(self.config, self.betas)
-        if getattr(self.config.sampling, "ckpt_id", None) is None:
-            states = torch.load(
-                os.path.join(self.args.log_path, "ckpt.pth"),
-                map_location=self.config.device,
-            )
-        else:
-            states = torch.load(
-                os.path.join(
-                    self.args.log_path, f"ckpt_{self.config.sampling.ckpt_id}.pth"
-                ),
-                map_location=self.config.device,
-            )
-        model = model.to(self.device)
-        # model = torch.nn.DataParallel(model)
-        model.load_state_dict(states[0], strict=True)
-
-        if self.config.model.ema:
-            if self.config.training.train_type == "layer":
-                ema_helper = LayerEMAHelper(mu=self.config.model.ema_rate)
-            else:
-                ema_helper = EMAHelper(mu=self.config.model.ema_rate)
-            ema_helper.register(model)
-            ema_helper.load_state_dict(states[-1])
-            ema_helper.ema(model)
-        else:
-            ema_helper = None
-        return model
     
     def sample(self):
-        
-        model = self.get_model()
-        model.eval()
+        model, _ = self.create_model()
+        self.sample_image(model, os.path.join(self.args.image_folder, f"sample.png"))
 
+    def sample_image(self, model, path):
         config = self.config
-
+        
         x = torch.randn(
             config.sampling.batch_size,
             config.data.channels,
@@ -260,10 +257,11 @@ class Diffusion(object):
             x = model.sample(x)
 
         x = inverse_data_transform(config, x)
-        save_image(x, os.path.join(self.args.image_folder, f"sample.png"), nrow=16)
+        save_image(x, path, nrow=16)
             
-    def eval(self):
-        model = self.get_model()
+    def fid(self):
+        _, ema = self.create_model()
+        model = ema.module
         model.eval()
         config = self.config.eval
         with torch.no_grad():
@@ -282,7 +280,7 @@ class Diffusion(object):
         
         print("Model(EMA): IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
 
-    def pre_train(self):
+    def loss(self):
         args, config = self.args, self.config
         dataset, test_dataset = get_dataset(args, config)
         train_loader = data.DataLoader(
@@ -291,16 +289,8 @@ class Diffusion(object):
             shuffle=True,
             num_workers=config.data.num_workers,
         )
-        model = UNet(config) 
-        states = torch.load(
-            os.path.join("exp", f"model-790000.ckpt"),
-            map_location=self.config.device,
-        )
-        model.load_state_dict(states, strict=True)
-        model = model.to(self.device)
 
-        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
-        logging.info(f"param: {total_params}")
+        model, ema = self.create_model()
        
         t = 0
         skip = self.num_timesteps // self.args.timesteps

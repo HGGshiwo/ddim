@@ -1,3 +1,4 @@
+use_pretrained: false
 data:
     dataset: "CIFAR10"
     image_size: 32

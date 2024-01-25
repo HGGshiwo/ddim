@@ -2,6 +2,10 @@ import math
 import torch
 import torch.nn as nn
 
+def compute_alpha(beta, t):
+    beta = torch.cat([torch.zeros(1, requires_grad=False).to(beta.device), beta], dim=0)
+    a = (1 - beta).cumprod(dim=0).index_select(0, t + 1).view(-1, 1, 1, 1)
+    return a
 
 def get_timestep_embedding(timesteps, embedding_dim):
     """
@@ -190,9 +194,8 @@ class AttnBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, betas, seq):
         super().__init__()
-        self.config = config
         ch, out_ch, ch_mult = config.model.ch, config.model.out_ch, tuple(config.model.ch_mult)
         num_res_blocks = config.model.num_res_blocks
         attn_resolutions = config.model.attn_resolutions
@@ -201,7 +204,8 @@ class Model(nn.Module):
         resolution = config.data.image_size
         resamp_with_conv = config.model.resamp_with_conv
         num_timesteps = config.diffusion.num_diffusion_timesteps
-        
+        self.betas = betas
+        self.seq = seq
         if config.model.type == 'bayesian':
             self.logvar = nn.Parameter(torch.zeros(num_timesteps))
         
@@ -339,3 +343,27 @@ class Model(nn.Module):
         h = nonlinearity(h)
         h = self.conv_out(h)
         return h
+
+    def sample(self, x):
+        kwargs = {}
+        n = x.size(0)
+        betas = self.betas
+        seq = self.seq[1:]
+        # seq_next = [-1] + self.seq[:-1]
+        seq_next = self.seq[:-1]
+        for i, j in zip(reversed(seq), reversed(seq_next)):
+            t = (torch.ones(n, requires_grad=False) * i).to(x.device)
+            next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)
+            at = compute_alpha(betas, t.long())
+            at_next = compute_alpha(betas, next_t.long())
+            beta_t = 1 - at / at_next
+            et = self.forward(x, t)
+            x0_t = (x - et * (1 - at).sqrt()) / at.sqrt()
+        
+            c1 = (
+                kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
+            )
+            c2 = ((1 - at_next) - c1 ** 2).sqrt()
+            x = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
+            
+        return x
