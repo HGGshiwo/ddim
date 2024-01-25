@@ -193,7 +193,7 @@ class Diffusion(object):
                         f"epoch: {epoch} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
                     )
                 t_index += 1
-                
+
                 optimizer.zero_grad()
                 loss.backward()
 
@@ -217,7 +217,7 @@ class Diffusion(object):
                 if step % self.config.training.sample_freq == 0:
                     model.eval()
                     path = os.path.join(self.args.log_path, '%d.png' % step)
-                    save_image(grid, path)
+                    self.sample_image(ema.module, path)
 
                 if step % self.config.training.snapshot_freq == 0:
                     states = [
@@ -242,6 +242,7 @@ class Diffusion(object):
         self.sample_image(model, os.path.join(self.args.image_folder, f"sample.png"))
 
     def sample_image(self, model, path):
+        
         config = self.config
         
         x = torch.randn(
