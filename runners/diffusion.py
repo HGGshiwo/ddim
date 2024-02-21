@@ -102,7 +102,7 @@ class Diffusion(object):
 
     def create_model(self):
         if self.config.use_pretrained:
-            model = UNet(self.config.model, self.betas, self.seq) 
+            model = UNet(self.config, self.betas, self.seq) 
             states = torch.load(
                 os.path.join("exp", f"model-790000.ckpt"),
                 map_location=self.config.device,
@@ -114,7 +114,7 @@ class Diffusion(object):
             model = Model(self.config, self.betas, self.seq)
             if not self.args.train:
                 states = torch.load(
-                    os.path.join(self.args.log_path, "ckpt"),
+                    os.path.join(self.args.log_path, "ckpt.pth"),
                     map_location=self.config.device,
                 )
                 model.load_state_dict(states[0], strict=True)
@@ -229,10 +229,10 @@ class Diffusion(object):
                     if self.config.model.ema:
                         states.append(ema.state_dict())
 
-                    torch.save(
-                        states,
-                        os.path.join(self.args.log_path, "ckpt_{}.pth".format(step)),
-                    )
+                    # torch.save(
+                    #     states,
+                    #     os.path.join(self.args.log_path, "ckpt_{}.pth".format(step)),
+                    # )
                     torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
 
                 data_start = time.time()
@@ -280,6 +280,40 @@ class Diffusion(object):
             use_torch=config.fid_use_torch, verbose=True)
         
         print("Model(EMA): IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
+
+    def fid2(self):
+        _, ema = self.create_model()
+        model = ema.module
+        model.eval()
+        config = self.config
+        img_id = len(glob.glob(f"{self.args.image_folder}/*"))
+        print(f"starting from image {img_id}")
+        total_n_samples = 50000
+        n_rounds = (total_n_samples - img_id) // config.sampling.batch_size
+        last_n = (total_n_samples - img_id) % config.sampling.batch_size
+        batchs = [config.sampling.batch_size] * n_rounds
+        if last_n != 0:
+            batchs += [last_n]
+        with torch.no_grad():
+            for n in tqdm.tqdm(
+                batchs, desc="Generating image samples for FID evaluation."
+            ): 
+                x = torch.randn(
+                    n,
+                    config.data.channels,
+                    config.data.image_size,
+                    config.data.image_size,
+                    device=self.device,
+                )
+
+                x = model.sample(x)
+                x = inverse_data_transform(config, x)
+
+                for i in range(n):
+                    save_image(
+                        x[i], os.path.join(self.args.image_folder, f"{img_id}.png")
+                    )
+                    img_id += 1
 
     def loss(self):
         args, config = self.args, self.config

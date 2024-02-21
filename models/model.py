@@ -349,3 +349,12 @@ class Model(nn.Module):
             x = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
             
         return x
+
+"""
+7000
+Model(EMA): IS: 7.532(0.085), FID: 29.244
+frechet_inception_distance: 33.23762 (-1)
+frechet_inception_distance: 29.36446
+8000
+Model(EMA): IS: 7.531(0.082), FID: 29.382 
+"""
