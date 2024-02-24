@@ -97,7 +97,7 @@ class Diffusion(object):
         elif self.model_var_type == "fixedsmall":
             self.logvar = posterior_variance.clamp(min=1e-20).log()
 
-        skip = self.num_timesteps // self.args.timesteps
+        skip = self.num_timesteps // self.config.diffusion.num_block
         self.seq = range(0, self.num_timesteps, skip)
 
     def create_model(self):

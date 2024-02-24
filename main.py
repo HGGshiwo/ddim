@@ -14,7 +14,7 @@ from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
 import os  
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"  
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
@@ -82,13 +82,9 @@ def parse_args_and_config():
     args.log_path = os.path.join(args.exp, "logs", args.doc)
 
     # parse config file
-    with open(os.path.join("configs", args.config), "r") as f:
+    with open(args.config, "r") as f:
         config = yaml.safe_load(f)
     new_config = dict2namespace(config)
-    try:
-        args.timesteps = len(new_config.model.ch_num)
-    except:
-        args.timesteps = 10
 
     tb_path = os.path.join(args.exp, "tensorboard", args.doc)
 

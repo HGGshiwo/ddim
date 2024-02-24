@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-
+import copy
 
 def compute_alpha(beta, t):
     beta = torch.cat([torch.zeros(1, requires_grad=False).to(beta.device), beta], dim=0)
@@ -174,8 +174,8 @@ class AttnBlock(nn.Module):
         return x+h_
 
 
-class ModelBlock(nn.Module):
-    def __init__(self, config, ch):
+class UnetBlock(nn.Module):
+    def __init__(self, config):
         super().__init__()
         out_ch, ch_mult = config.model.out_ch, tuple(config.model.ch_mult)
         num_res_blocks = config.model.num_res_blocks
@@ -188,7 +188,8 @@ class ModelBlock(nn.Module):
         
         if config.model.type == 'bayesian':
             self.logvar = nn.Parameter(torch.zeros(num_timesteps))
-        
+       
+        ch = config.model.ch_num
         self.ch = ch
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
@@ -307,11 +308,28 @@ class ModelBlock(nn.Module):
 class Model(nn.Module):
     def __init__(self, config, betas, seq):
         super().__init__()
-        timesteps = len(config.model.ch_num)
-        assert len(seq) == len(config.model.ch_num)
+        num_block = config.diffusion.num_block
+        # 为每一个block计算config
+        # block属性如果是[{value: xxx, num: yy}, {value: yyy, num: zz}, ...]
+        list_value = {}
+        for key, value in vars(config.model).items():
+            if isinstance(value, list) and isinstance(value[0], dict):
+                new_value = []
+                for data in value:
+                    new_value += [data['value']] * data['num']
+                assert len(new_value) == num_block, f'num_block: {num_block} != {len(new_value)}'
+                list_value[key] = new_value
+        configs = []
+        for i in range(num_block):
+            new_config = copy.deepcopy(config)
+            for key, value in list_value.items():
+                setattr(new_config.model, key, value[i])
+            configs.append(new_config)
+
+        block_type = globals()[config.model.block_type]  
         self.models = nn.ModuleDict({
-            str(key): ModelBlock(config, ch) 
-            for key, ch in zip(seq, config.model.ch_num)
+            str(key): block_type(config) 
+            for key, config in zip(seq, configs)
         })
         self.seq = seq
         self.betas = betas
@@ -357,4 +375,8 @@ frechet_inception_distance: 33.23762 (-1)
 frechet_inception_distance: 29.36446
 8000
 Model(EMA): IS: 7.531(0.082), FID: 29.382 
+3000
+Model(EMA): IS: 8.251(0.101), FID: 21.084
+4000
+Model(EMA): IS: 8.182(0.094), FID: 22.527
 """
