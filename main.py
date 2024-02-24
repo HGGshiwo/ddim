@@ -7,14 +7,13 @@ import sys
 import os
 import torch
 import numpy as np
-import torch.utils.tensorboard as tb
 import datetime
 
 from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
 import os  
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"  
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
@@ -86,8 +85,6 @@ def parse_args_and_config():
         config = yaml.safe_load(f)
     new_config = dict2namespace(config)
 
-    tb_path = os.path.join(args.exp, "tensorboard", args.doc)
-
     args.train = not args.sample and not args.loss and not args.fid 
     if args.train:
         if not args.resume_training:
@@ -96,7 +93,6 @@ def parse_args_and_config():
             with open(os.path.join(args.log_path, "config.yml"), "w") as f:
                 yaml.dump(new_config, f, default_flow_style=False)
 
-        new_config.tb_logger = tb.SummaryWriter(log_dir=tb_path)
         # setup logger
         level = getattr(logging, args.verbose.upper(), None)
         if not isinstance(level, int):

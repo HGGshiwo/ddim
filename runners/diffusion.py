@@ -19,6 +19,8 @@ from score.both import get_inception_and_fid_score
 from torchvision.utils import make_grid, save_image
 import random
 from tqdm import trange
+import torch.utils.tensorboard as tb
+
 
 def torch2hwcuint8(x, clip=False):
     if clip:
@@ -134,7 +136,8 @@ class Diffusion(object):
 
     def train(self):
         args, config = self.args, self.config
-        tb_logger = self.config.tb_logger
+        tb_path = os.path.join(args.exp, "tensorboard", args.doc)
+        tb_logger = tb.SummaryWriter(log_dir=tb_path)
         dataset, test_dataset = get_dataset(args, config)
         train_loader = data.DataLoader(
             dataset,
@@ -183,9 +186,9 @@ class Diffusion(object):
                     loss = layer_loss(model, x, t, x_T, self.betas)
                 
                 if self.config.training.train_type == "layer":
-                    tb_logger.add_scalar(f"layer{t_index}/loss", loss, global_step=step)
+                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
                     logging.info(
-                        f"epoch: {epoch} layer: {t_index} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
                     )
                 else:
                     tb_logger.add_scalar(f"loss", loss, global_step=step)
@@ -328,7 +331,7 @@ class Diffusion(object):
         model, ema = self.create_model()
        
         t = 0
-        skip = self.num_timesteps // self.args.timesteps
+        skip = self.num_timesteps // config.diffusion.num_block
         seq = range(0, self.num_timesteps, skip)
         t_index = 0
         for i, (x, y) in enumerate(train_loader):
