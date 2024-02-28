@@ -31,10 +31,10 @@ diffusion:
     beta_start: 0.0001
     beta_end: 0.02
     num_diffusion_timesteps: 1000
-    num_block: 20
+    num_block: 50
 
 training:
-    batch_size: 64
+    batch_size: 32
     n_epochs: 10000
     n_iters: 5000000
     snapshot_freq: 5000

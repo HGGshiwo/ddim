@@ -336,6 +336,7 @@ class Model(nn.Module):
         pass
     
     def forward(self, x, t):
+        self.models[str(t)].cuda()
         et = self.models[str(t)](x)
         return et
 
