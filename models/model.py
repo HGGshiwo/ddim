@@ -335,16 +335,27 @@ class Model(nn.Module):
         self.seq = seq
         self.betas = betas
         if self.learn_alpha:
-            self.pe = nn.Embedding(num_block, 2)
+            self.pe = nn.Embedding(config.diffusion.num_diffusion_timesteps, 2)
         pass
     
     def forward(self, x, t):
-        self.models[str(t)].cuda()
         et = self.models[str(t)](x)
+        if self.learn_alpha:
+            et = self.get_x_next(et, x, t)
         return et
 
     def __getitem__(self, i):
         return self.models[str(i)]
+    
+    def get_x_next(self, et, x, t):
+        # 直接预测均值
+        t = (torch.ones(x.shape[0], requires_grad=False) * t).to(x.device)
+        ab =  self.pe(t.long())
+        a, b = ab[:, 0], ab[:, 1]
+        a = a.reshape((-1, 1, 1, 1))
+        b = b.reshape((-1, 1, 1, 1))
+        x = a * x - b * et
+        return x
     
     def sample(self, x):
         kwargs = {}
@@ -356,10 +367,10 @@ class Model(nn.Module):
             h = x
         
             et = self.forward(x, i)
-            t = (torch.ones(n, requires_grad=False) * i).to(x.device)
-            next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)
             
-            if not self.learn_alpha:    
+            if not self.learn_alpha:
+                t = (torch.ones(n, requires_grad=False) * i).to(x.device)
+                next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)    
                 at = compute_alpha(betas, t.long())
                 at_next = compute_alpha(betas, next_t.long())
                 beta_t = 1 - at / at_next
@@ -372,9 +383,7 @@ class Model(nn.Module):
                 c2 = ((1 - at_next) - c1 ** 2).sqrt()
                 x = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
             else:
-                ab =  self.pe(t.long())
-                a, b = ab[:, 0], ab[:, 1]
-                x = a * x - b * et
+                x = self.get_x_next(et, x, i)
             
         return x
 
