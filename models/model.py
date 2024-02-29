@@ -309,6 +309,7 @@ class Model(nn.Module):
     def __init__(self, config, betas, seq):
         super().__init__()
         num_block = config.diffusion.num_block
+        self.learn_alpha = config.diffusion.learn_alpha
         # 为每一个block计算config
         # block属性如果是[{value: xxx, num: yy}, {value: yyy, num: zz}, ...]
         list_value = {}
@@ -333,6 +334,8 @@ class Model(nn.Module):
         })
         self.seq = seq
         self.betas = betas
+        if self.learn_alpha:
+            self.pe = nn.Embedding(num_block, 2)
         pass
     
     def forward(self, x, t):
@@ -355,17 +358,23 @@ class Model(nn.Module):
             et = self.forward(x, i)
             t = (torch.ones(n, requires_grad=False) * i).to(x.device)
             next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)
-            at = compute_alpha(betas, t.long())
-            at_next = compute_alpha(betas, next_t.long())
-            beta_t = 1 - at / at_next
             
-            x0_t = (x - et * (1 - at).sqrt()) / at.sqrt()
-        
-            c1 = (
-                kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
-            )
-            c2 = ((1 - at_next) - c1 ** 2).sqrt()
-            x = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
+            if not self.learn_alpha:    
+                at = compute_alpha(betas, t.long())
+                at_next = compute_alpha(betas, next_t.long())
+                beta_t = 1 - at / at_next
+                
+                x0_t = (x - et * (1 - at).sqrt()) / at.sqrt()
+            
+                c1 = (
+                    kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
+                )
+                c2 = ((1 - at_next) - c1 ** 2).sqrt()
+                x = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
+            else:
+                ab =  self.pe(t.long())
+                a, b = ab[:, 0], ab[:, 1]
+                x = a * x - b * et
             
         return x
 
@@ -380,4 +389,6 @@ Model(EMA): IS: 7.531(0.082), FID: 29.382
 Model(EMA): IS: 8.251(0.101), FID: 21.084
 4000
 Model(EMA): IS: 8.182(0.094), FID: 22.527
+3000? (20)
+Model(EMA): IS: 8.678(0.076), FID: 10.453
 """
