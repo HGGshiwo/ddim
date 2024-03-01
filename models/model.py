@@ -334,13 +334,28 @@ class Model(nn.Module):
         })
         self.seq = seq
         self.betas = betas
+
+        range_seq = list(range(0, config.diffusion.num_diffusion_timesteps))
+        beta = torch.cat([torch.zeros(1, device=betas.device), betas], dim=0)
+        seq_t = torch.tensor(range_seq[1:], dtype=torch.long, device=betas.device)
+        seq_t_next = torch.tensor(range_seq[:-1], dtype=torch.long, device=betas.device)
+        at = (1 - beta).cumprod(dim=0).index_select(0, seq_t+1)
+        at_next = (1 - beta).cumprod(dim=0).index_select(0, seq_t_next+1)
+        coef_a = at_next.sqrt() / at.sqrt()
+        coef_b = (1 - at_next).sqrt() - (1 - at).sqrt() * at_next.sqrt() / at.sqrt()
+
+        self.register_buffer('a', coef_a)
+        self.register_buffer('b', coef_b)
+
         if self.learn_alpha:
-            self.pe = nn.Embedding(config.diffusion.num_diffusion_timesteps, 2)
+            self.embd_a = nn.Embedding(config.diffusion.num_diffusion_timesteps, 1)
+            self.embd_b = nn.Embedding(config.diffusion.num_diffusion_timesteps, 1)
         pass
     
     def forward(self, x, t):
         et = self.models[str(t)](x)
         if self.learn_alpha:
+            # layer t 是输入t, 输出t-1
             et = self.get_x_next(et, x, t)
         return et
 
@@ -349,39 +364,24 @@ class Model(nn.Module):
     
     def get_x_next(self, et, x, t):
         # 直接预测均值
-        t = (torch.ones(x.shape[0], requires_grad=False) * t).to(x.device)
-        ab =  self.pe(t.long())
-        a, b = ab[:, 0], ab[:, 1]
+        pe_a = (torch.ones(x.shape[0], 1, device=x.device) * self.a[t])
+        pe_b = (torch.ones(x.shape[0], 1, device=x.device) * self.b[t])
+        t = torch.ones(x.shape[0], device=x.device) * t
+        embd_a =  self.embd_a(t.long())
+        embd_b = self.embd_b(t.long())
+        a, b = embd_a + pe_a, embd_b + pe_b
         a = a.reshape((-1, 1, 1, 1))
         b = b.reshape((-1, 1, 1, 1))
-        x = a * x - b * et
+        x = a * x + b * et
         return x
     
     def sample(self, x):
-        kwargs = {}
-        n = x.size(0)
-        betas = self.betas
-        seq = self.seq[1:]
-        seq_next = self.seq[:-1]
-        for i, j in zip(reversed(seq), reversed(seq_next)):
-            h = x
         
+        for i in reversed(self.seq[1:]):        
             et = self.forward(x, i)
             
             if not self.learn_alpha:
-                t = (torch.ones(n, requires_grad=False) * i).to(x.device)
-                next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)    
-                at = compute_alpha(betas, t.long())
-                at_next = compute_alpha(betas, next_t.long())
-                beta_t = 1 - at / at_next
-                
-                x0_t = (x - et * (1 - at).sqrt()) / at.sqrt()
-            
-                c1 = (
-                    kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
-                )
-                c2 = ((1 - at_next) - c1 ** 2).sqrt()
-                x = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
+                x = self.a[i].view(-1, 1, 1, 1) * x + self.b[i].view(-1, 1, 1, 1) * et    
             else:
                 x = self.get_x_next(et, x, i)
             

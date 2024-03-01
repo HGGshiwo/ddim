@@ -12,7 +12,7 @@ from models.model import Model
 from models.diffusion import Model as UNet
 from models.model_ema import ModelEma
 from functions import get_optimizer
-from functions.losses import end2end_loss, layer_loss, layer_loss_alpha
+from functions.losses import end2end_loss, layer_loss, layer_loss_v2
 from datasets import get_dataset, data_transform, inverse_data_transform
 from functions.ckpt_util import get_ckpt_path
 from score.both import get_inception_and_fid_score
@@ -161,7 +161,7 @@ class Diffusion(object):
                 ema.load_state_dict(states[4])
 
         t_index = 0 
-        if self.config.diffusion.learn_alpha:
+        if self.config.training.train_type == "layer_v2":
             t_index = 1 
             last_t_index = 0
         for epoch in range(start_epoch, self.config.training.n_epochs):
@@ -175,11 +175,14 @@ class Diffusion(object):
                 data_time += time.time() - data_start
                 
                 t_index = t_index % len(self.seq)
+
+                if self.config.training.train_type == "layer_v2":
+                    if last_t_index > t_index:
+                        last_t_index = t_index
+                        t_index += 1 
+                
                 t = self.seq[t_index]
                 
-                if last_t_index > t_index:
-                    last_t_index = t_index
-                    t_index += 1 
                 step += 1
 
                 x = x.to(self.device)
@@ -188,24 +191,26 @@ class Diffusion(object):
                 
                 if self.config.training.train_type == "end2end":
                     loss = end2end_loss(model, x, self.seq[-1], x_T, self.betas)                
+                elif self.config.training.train_type == "layer_v2":
+                    last_t = self.seq[last_t_index]
+                    loss = layer_loss_v2(model, x, last_t, t, x_T, self.betas)
+                    last_t_index = t_index
+                elif self.config.training.train_type == "layer":
+                    loss = layer_loss(model, x, t, x_T, self.betas)
                 else:
-                    if self.config.diffusion.learn_alpha:
-                        last_t = self.seq[last_t_index]
-                        loss = layer_loss_alpha(model, x, last_t, t, x_T, self.betas)
-                        last_t_index = t_index
-                    else:
-                        loss = layer_loss(model, x, t, x_T, self.betas)
+                    raise ValueError(f"{self.config.training.train_type}")
                 
-                if self.config.training.train_type == "layer":
-                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
-                    logging.info(
-                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
-                    )
-                else:
+                if self.config.training.train_type == "end2end":
                     tb_logger.add_scalar(f"loss", loss, global_step=step)
                     logging.info(
                         f"epoch: {epoch} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
                     )
+                else:
+                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
+                    logging.info(
+                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                    )
+
                 t_index += 1
 
                 optimizer.zero_grad()
@@ -223,10 +228,10 @@ class Diffusion(object):
                 optimizer.step()
 
                 if self.config.model.ema:
-                    if self.config.training.train_type == "layer":
-                        ema.update(model, t)
-                    else:
+                    if self.config.training.train_type == "end2end":
                         ema.update(model)
+                    else:
+                        ema.update(model, t)
                 
                 if step % self.config.training.sample_freq == 0:
                     model.eval()
