@@ -364,9 +364,9 @@ class Model(nn.Module):
         if self.learn_alpha:
             embd_a =  self.embd_a(t.long())
             embd_b = self.embd_b(t.long())
+            embd_a = embd_a.reshape((-1, 1, 1, 1))
+            embd_b = embd_b.reshape((-1, 1, 1, 1))
             a, b = embd_a + a, embd_b + b
-        a = a.reshape((-1, 1, 1, 1))
-        b = b.reshape((-1, 1, 1, 1))
         x = a * x + b * et
         return x
     
@@ -392,4 +392,7 @@ Model(EMA): IS: 8.251(0.101), FID: 21.084
 Model(EMA): IS: 8.182(0.094), FID: 22.527
 3000? (20)
 Model(EMA): IS: 8.678(0.076), FID: 10.453
+
+4000(50)
+Model(EMA): IS: 8.188(0.126), FID: 13.217
 """
