@@ -21,7 +21,7 @@ def layer_loss_v2(
     model,
     x0: torch.Tensor,
     t_m1: int,
-    t: int,
+    t: int, 
     e: torch.Tensor,
     b: torch.Tensor, 
     keepdim=False
@@ -30,7 +30,7 @@ def layer_loss_v2(
     at_next = (1-b).cumprod(dim=0)[t_m1].view(-1, 1, 1, 1)
     x = at.sqrt() * x0 + (1.0 - at).sqrt() * e
     xt_m1 = at_next.sqrt() * x0 + (1 - at_next).sqrt() * e
-    output = model(x, t)
+    output = model(x, t, t_m1)
     if keepdim:
         return (xt_m1 - output).square().sum(dim=(1, 2, 3))
     else:

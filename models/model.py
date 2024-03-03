@@ -309,7 +309,7 @@ class Model(nn.Module):
     def __init__(self, config, betas, seq):
         super().__init__()
         num_block = config.diffusion.num_block
-        self.pred_mean = config.training.train_type
+        self.pred_mean = config.training.train_type == "layer_v2"
         self.learn_alpha = config.diffusion.learn_alpha
         # 为每一个block计算config
         # block属性如果是[{value: xxx, num: yy}, {value: yyy, num: zz}, ...]
@@ -336,37 +336,30 @@ class Model(nn.Module):
         self.seq = seq
         self.betas = betas
 
-        range_seq = list(range(0, config.diffusion.num_diffusion_timesteps))
-        beta = torch.cat([torch.zeros(1, device=betas.device), betas], dim=0)
-        seq_t = torch.tensor(range_seq[1:], dtype=torch.long, device=betas.device)
-        seq_t_next = torch.tensor(range_seq[:-1], dtype=torch.long, device=betas.device)
-        at = (1 - beta).cumprod(dim=0).index_select(0, seq_t+1)
-        at_next = (1 - beta).cumprod(dim=0).index_select(0, seq_t_next+1)
-        coef_a = at_next.sqrt() / at.sqrt()
-        coef_b = (1 - at_next).sqrt() - (1 - at).sqrt() * at_next.sqrt() / at.sqrt()
-
-        self.register_buffer('a', coef_a)
-        self.register_buffer('b', coef_b)
-
         if self.learn_alpha:
             self.embd_a = nn.Embedding(config.diffusion.num_diffusion_timesteps, 1)
             self.embd_b = nn.Embedding(config.diffusion.num_diffusion_timesteps, 1)
         pass
     
-    def forward(self, x, t):
+    def forward(self, x, t, last_t=None):
         et = self.models[str(t)](x)
         if self.pred_mean:
             # layer t 是输入t, 输出t-1
-            et = self.get_x_next(et, x, t)
+            et = self.get_x_next(et, x, t, last_t)
         return et
 
     def __getitem__(self, i):
         return self.models[str(i)]
     
-    def get_x_next(self, et, x, t):
+    def get_x_next(self, et, x, i, j):
         # 直接预测均值
-        a = (torch.ones(x.shape[0], 1, device=x.device) * self.a[t])
-        b = (torch.ones(x.shape[0], 1, device=x.device) * self.b[t])
+        n = x.size(0)
+        t = (torch.ones(n, requires_grad=False) * i).to(x.device)
+        next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)    
+        at = compute_alpha(self.betas, t.long())
+        at_next = compute_alpha(self.betas, next_t.long())
+        a = at_next.sqrt() / at.sqrt()
+        b = (1 - at_next).sqrt() - (1 - at).sqrt() / at.sqrt() * at_next.sqrt()
         t = torch.ones(x.shape[0], device=x.device) * t
         if self.learn_alpha:
             embd_a =  self.embd_a(t.long())
@@ -379,9 +372,10 @@ class Model(nn.Module):
     
     def sample(self, x):
         
-        for i in reversed(self.seq[1:]):        
-            et = self.forward(x, i)
-            x = self.get_x_next(et, x, i)
+        for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):        
+            et = self.forward(x, i, j)
+            if not self.pred_mean:
+                x = self.get_x_next(et, x, i, j)
             
         return x
 
