@@ -26,17 +26,11 @@ def layer_loss_v2(
     b: torch.Tensor, 
     keepdim=False
 ):
-    # 使用e来计算x(t-1), 再使用e2来计算x(t), 损失是|f(x(t)) - x(t-1)|
-    # 保证e2和e是无关的, t和t-1不一定是相邻的
-    if t_m1 == 0:
-        xt_m1 = x0
-    else:
-        a = (1-b).cumprod(dim=0)[t_m1].view(-1, 1, 1, 1)
-        xt_m1 = x0 * a.sqrt() + e * (1.0 - a).sqrt()
-    e2 = torch.randn_like(e)
-    a2 = (1-b[t_m1:]).cumprod(dim=0)[t-t_m1].view(-1, 1, 1, 1)
-    xt = xt_m1 * a2.sqrt() + e2 * (1.0 - a2).sqrt()
-    output = model(xt, t)
+    at = (1-b).cumprod(dim=0)[t].view(-1, 1, 1, 1)
+    at_next = (1-b).cumprod(dim=0)[t_m1].view(-1, 1, 1, 1)
+    x = at.sqrt() * x0 + (1.0 - at).sqrt() * e
+    xt_m1 = at_next.sqrt() * x0 + (1 - at_next).sqrt() * e
+    output = model(x, t)
     if keepdim:
         return (xt_m1 - output).square().sum(dim=(1, 2, 3))
     else:

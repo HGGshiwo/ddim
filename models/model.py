@@ -309,6 +309,7 @@ class Model(nn.Module):
     def __init__(self, config, betas, seq):
         super().__init__()
         num_block = config.diffusion.num_block
+        self.pred_mean = config.training.train_type
         self.learn_alpha = config.diffusion.learn_alpha
         # 为每一个block计算config
         # block属性如果是[{value: xxx, num: yy}, {value: yyy, num: zz}, ...]
@@ -354,7 +355,7 @@ class Model(nn.Module):
     
     def forward(self, x, t):
         et = self.models[str(t)](x)
-        if self.learn_alpha:
+        if self.pred_mean:
             # layer t 是输入t, 输出t-1
             et = self.get_x_next(et, x, t)
         return et
@@ -364,12 +365,13 @@ class Model(nn.Module):
     
     def get_x_next(self, et, x, t):
         # 直接预测均值
-        pe_a = (torch.ones(x.shape[0], 1, device=x.device) * self.a[t])
-        pe_b = (torch.ones(x.shape[0], 1, device=x.device) * self.b[t])
+        a = (torch.ones(x.shape[0], 1, device=x.device) * self.a[t])
+        b = (torch.ones(x.shape[0], 1, device=x.device) * self.b[t])
         t = torch.ones(x.shape[0], device=x.device) * t
-        embd_a =  self.embd_a(t.long())
-        embd_b = self.embd_b(t.long())
-        a, b = embd_a + pe_a, embd_b + pe_b
+        if self.learn_alpha:
+            embd_a =  self.embd_a(t.long())
+            embd_b = self.embd_b(t.long())
+            a, b = embd_a + a, embd_b + b
         a = a.reshape((-1, 1, 1, 1))
         b = b.reshape((-1, 1, 1, 1))
         x = a * x + b * et
@@ -379,11 +381,7 @@ class Model(nn.Module):
         
         for i in reversed(self.seq[1:]):        
             et = self.forward(x, i)
-            
-            if not self.learn_alpha:
-                x = self.a[i].view(-1, 1, 1, 1) * x + self.b[i].view(-1, 1, 1, 1) * et    
-            else:
-                x = self.get_x_next(et, x, i)
+            x = self.get_x_next(et, x, i)
             
         return x
 
