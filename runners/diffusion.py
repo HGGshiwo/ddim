@@ -161,9 +161,10 @@ class Diffusion(object):
                 ema.load_state_dict(states[4])
 
         t_index = 0 
-        if self.config.training.train_type == "layer_v2":
-            t_index = 1 
-            last_t_index = 0
+        
+        seq = self.seq[1:]
+        seq_next = self.seq[:-1]
+
         for epoch in range(start_epoch, self.config.training.n_epochs):
             
             model.train()  
@@ -174,14 +175,10 @@ class Diffusion(object):
             for i, (x, y) in enumerate(train_loader):                
                 data_time += time.time() - data_start
                 
-                t_index = t_index % len(self.seq)
-
-                if self.config.training.train_type == "layer_v2":
-                    if last_t_index > t_index:
-                        last_t_index = t_index
-                        t_index += 1 
+                t_index = t_index % len(seq)
                 
-                t = self.seq[t_index]
+                t = seq[t_index]
+                t_next = seq_next[t_index]
                 
                 step += 1
 
@@ -190,11 +187,9 @@ class Diffusion(object):
                 x_T = torch.randn_like(x)
                 
                 if self.config.training.train_type == "end2end":
-                    loss = end2end_loss(model, x, self.seq[-1], x_T, self.betas)                
+                    loss = end2end_loss(model, x, seq[-1], x_T, self.betas)                
                 elif self.config.training.train_type == "layer_v2":
-                    last_t = self.seq[last_t_index]
-                    loss = layer_loss_v2(model, x, last_t, t, x_T, self.betas)
-                    last_t_index = t_index
+                    loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
                 elif self.config.training.train_type == "layer":
                     loss = layer_loss(model, x, t, x_T, self.betas)
                 else:
