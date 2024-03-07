@@ -404,6 +404,10 @@ Model(EMA): IS: 8.644(0.094), FID:  9.093
 8700(50)
 Model(EMA): IS: 8.711(0.096), FID:  8.929
 
-1000(mean)
-Model(EMA): IS: 4.772(0.032), FID: 96.514
+1000(mean loss v2)
+Model(EMA): IS: 4.772(0.032), FID: 96.514(不算最后一步)
+
+890(mean loss_v3)
+Model(EMA): IS: 4.077(0.040), FID:122.615
+Model(EMA): IS: 4.432(0.023), FID:108.831
 """

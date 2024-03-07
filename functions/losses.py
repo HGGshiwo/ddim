@@ -30,11 +30,11 @@ def layer_loss_v2(
     x = at.sqrt() * x0 + (1.0 - at).sqrt() * e
     xt_m1 = at_next.sqrt() * x0 + (1 - at_next).sqrt() * e
     output = model(x, t, t_next)
-    coeff = at_next.sqrt() * (1 - at).sqrt() / at.sqrt() - (1 - at_next).sqrt()
+    # coeff = at_next.sqrt() * (1 - at).sqrt() / at.sqrt() - (1 - at_next).sqrt()
     if keepdim:
         return (xt_m1 - output).square().sum(dim=(1, 2, 3))
     else:
-        return ((xt_m1 - output) / coeff).square().sum(dim=(1, 2, 3)).mean(dim=0)
+        return (xt_m1 - output).square().sum(dim=(1, 2, 3)).mean(dim=0)
 
 def end2end_loss(
     model,
