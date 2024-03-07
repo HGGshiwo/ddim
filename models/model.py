@@ -376,7 +376,8 @@ class Model(nn.Module):
             et = self.forward(x, i, j)
             if not self.pred_mean:
                 x = self.get_x_next(et, x, i, j)
-            
+            else:
+                x = et
         return x
 
 """
@@ -400,4 +401,9 @@ Model(EMA): IS: 8.404(0.107), FID: 10.614
 Model(EMA): IS: 8.558(0.108), FID:  9.456
 7500(50)
 Model(EMA): IS: 8.644(0.094), FID:  9.093
+8700(50)
+Model(EMA): IS: 8.711(0.096), FID:  8.929
+
+1000(mean)
+Model(EMA): IS: 4.772(0.032), FID: 96.514
 """
