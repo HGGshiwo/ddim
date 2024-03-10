@@ -174,7 +174,7 @@ class AttnBlock(nn.Module):
         return x+h_
 
 
-class UnetBlock(nn.Module):
+class _UnetBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         out_ch, ch_mult = config.model.out_ch, tuple(config.model.ch_mult)
@@ -305,12 +305,56 @@ class UnetBlock(nn.Module):
         h = self.conv_out(h)
         return h
 
+
+class UnetBlock(_UnetBlock):
+    def __init__(self, config, betas) -> None:
+        super().__init__(config)
+        learn_alpha = config.diffusion.learn_alpha
+        self.pred_mean = config.training.train_type == "layer_v2" 
+        self.sample_block = SampleBlock(betas, learn_alpha)
+        
+    def forward(self, x, t, last_t=None):
+        et = super().forward(x)
+        if self.pred_mean:
+            # layer t 是输入t, 输出t-1
+            et = self.sample_block(et, x, t, last_t)
+        return et
+    
+    def sample(self, x, i, j):
+        et = super().forward(x)
+        x = self.sample_block(et, x, i, j)
+        return x
+
+class SampleBlock(nn.Module):
+    def __init__(self, betas, learn_alpha) -> None:
+        super().__init__()
+        self.betas = betas
+        self.learn_alpha = learn_alpha
+        if learn_alpha:
+            self.embd_a = nn.Parameter(torch.zeros(1, requires_grad=True)) 
+            self.embd_b = nn.Parameter(torch.zeros(1, requires_grad=True)) 
+        
+    def forward(self, et, x, i, j):
+         # 直接预测均值
+        n = x.size(0)
+        t = (torch.ones(n, requires_grad=False) * i).to(x.device)
+        next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)    
+        at = compute_alpha(self.betas, t.long())
+        at_next = compute_alpha(self.betas, next_t.long())
+        a = at_next.sqrt() / at.sqrt()
+        b = (1 - at_next).sqrt() - (1 - at).sqrt() / at.sqrt() * at_next.sqrt()
+        if self.learn_alpha:
+            embd_a =  self.embd_a.reshape((-1, 1, 1, 1))
+            embd_b = self.embd_b.reshape((-1, 1, 1, 1))
+            a, b = embd_a + a, embd_b + b
+        x = a * x + b * et
+        return x
+        
+
 class Model(nn.Module):
     def __init__(self, config, betas, seq):
         super().__init__()
         num_block = config.diffusion.num_block
-        self.pred_mean = config.training.train_type == "layer_v2"
-        self.learn_alpha = config.diffusion.learn_alpha
         # 为每一个block计算config
         # block属性如果是[{value: xxx, num: yy}, {value: yyy, num: zz}, ...]
         list_value = {}
@@ -330,87 +374,68 @@ class Model(nn.Module):
 
         block_type = globals()[config.model.block_type]  
         self.models = nn.ModuleDict({
-            str(key): block_type(config) 
+            str(key): block_type(config, betas) 
             for key, config in zip(seq, configs)
         })
         self.seq = seq
         self.betas = betas
-
-        if self.learn_alpha:
-            self.embd_a = nn.Embedding(config.diffusion.num_diffusion_timesteps, 1)
-            self.embd_b = nn.Embedding(config.diffusion.num_diffusion_timesteps, 1)
-        pass
+    
     
     def forward(self, x, t, last_t=None):
-        et = self.models[str(t)](x)
-        if self.pred_mean:
-            # layer t 是输入t, 输出t-1
-            et = self.get_x_next(et, x, t, last_t)
+        et = self.models[str(t)](x, t, last_t)
         return et
 
     def __getitem__(self, i):
         return self.models[str(i)]
     
-    def get_x_next(self, et, x, i, j):
-        # 直接预测均值
-        n = x.size(0)
-        t = (torch.ones(n, requires_grad=False) * i).to(x.device)
-        next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)    
-        at = compute_alpha(self.betas, t.long())
-        at_next = compute_alpha(self.betas, next_t.long())
-        a = at_next.sqrt() / at.sqrt()
-        b = (1 - at_next).sqrt() - (1 - at).sqrt() / at.sqrt() * at_next.sqrt()
-        t = torch.ones(x.shape[0], device=x.device) * t
-        if self.learn_alpha:
-            embd_a =  self.embd_a(t.long())
-            embd_b = self.embd_b(t.long())
-            embd_a = embd_a.reshape((-1, 1, 1, 1))
-            embd_b = embd_b.reshape((-1, 1, 1, 1))
-            a, b = embd_a + a, embd_b + b
-        x = a * x + b * et
-        return x
-    
     def sample(self, x):
-        
         for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):        
-            et = self.forward(x, i, j)
-            if not self.pred_mean:
-                x = self.get_x_next(et, x, i, j)
-            else:
-                x = et
+            x = self.models[str(i)].sample(x, i, j)                
         return x
 
 """
-7000
-Model(EMA): IS: 7.532(0.085), FID: 29.244
-frechet_inception_distance: 33.23762 (-1)
-frechet_inception_distance: 29.36446
-8000
-Model(EMA): IS: 7.531(0.082), FID: 29.382 
-3000
-Model(EMA): IS: 8.251(0.101), FID: 21.084
-4000
-Model(EMA): IS: 8.182(0.094), FID: 22.527
-3000? (20)
-Model(EMA): IS: 8.678(0.076), FID: 10.453
-4000(50)
-Model(EMA): IS: 8.188(0.126), FID: 13.217
-4800(50)
-Model(EMA): IS: 8.404(0.107), FID: 10.614
-6000(50)
-Model(EMA): IS: 8.558(0.108), FID:  9.456
-7500(50)
-Model(EMA): IS: 8.644(0.094), FID:  9.093
-8700(50)
-Model(EMA): IS: 8.711(0.096), FID:  8.929
-
-1000(mean loss v2)
-Model(EMA): IS: 4.077(0.040), FID:122.615
-
-890(mean loss_v3)
-Model(EMA): IS: 4.432(0.023), FID:108.831
-Model(EMA): IS: 4.772(0.032), FID: 96.514(不算最后一步)
-
-(learn alpha loss v2)
-Model(EMA): IS: 1.832(0.012), FID:440.912
+10:
+    7000
+    Model(EMA): IS: 7.532(0.085), FID: 29.244
+    frechet_inception_distance: 33.23762 (-1)
+    frechet_inception_distance: 29.36446
+    8000
+    Model(EMA): IS: 7.531(0.082), FID: 29.382 
+    3000
+    Model(EMA): IS: 8.251(0.101), FID: 21.084
+    4000
+    Model(EMA): IS: 8.182(0.094), FID: 22.527
+20:
+    3000? 
+    Model(EMA): IS: 8.678(0.076), FID: 10.453
+50:    
+    4000
+    Model(EMA): IS: 8.188(0.126), FID: 13.217
+    4800
+    Model(EMA): IS: 8.404(0.107), FID: 10.614
+    6000
+    Model(EMA): IS: 8.558(0.108), FID:  9.456
+    7500
+    Model(EMA): IS: 8.644(0.094), FID:  9.093
+    8700
+    Model(EMA): IS: 8.711(0.096), FID:  8.929
+    10000
+    Model(EMA): IS: 8.755(0.100), FID:  8.814
+20:
+loss v2:
+    1000
+    Model(EMA): IS: 4.077(0.040), FID:122.615
+loss v3:
+    890
+    Model(EMA): IS: 4.432(0.023), FID:108.831
+    Model(EMA): IS: 4.772(0.032), FID: 96.514(不算最后一步)
+    2000
+    Model(EMA): IS: 8.487(0.083), FID: 10.401
+    3000
+    Model(EMA): IS: 8.705(0.098), FID: 10.461
+loss v3, learn_alpha:
+    700
+    Model(EMA): IS: 7.367(0.062), FID: 25.280
+loss v2, learn_alpha:
+    Model(EMA): IS: 1.832(0.012), FID:440.912
 """

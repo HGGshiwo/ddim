@@ -32,7 +32,7 @@ diffusion:
     beta_end: 0.02
     num_diffusion_timesteps: 1000
     num_block: 20
-    learn_alpha: false
+    learn_alpha: true
 
 
 training:

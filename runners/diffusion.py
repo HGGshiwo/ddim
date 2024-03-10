@@ -147,7 +147,7 @@ class Diffusion(object):
         )
         model, ema = self.create_model()
         optimizer = get_optimizer(self.config, model.parameters())
-
+    
         start_epoch, step = 0, 0
         if self.args.resume_training:
             states = torch.load(os.path.join(self.args.log_path, "ckpt.pth"))
@@ -159,7 +159,7 @@ class Diffusion(object):
             step = states[3]
             if self.config.model.ema:
                 ema.load_state_dict(states[4])
-
+                
         t_index = 0 
         
         seq = self.seq[1:]
@@ -171,7 +171,7 @@ class Diffusion(object):
             
             data_start = time.time()
             data_time = 0
-        
+            
             for i, (x, y) in enumerate(train_loader):                
                 data_time += time.time() - data_start
                 
@@ -229,9 +229,11 @@ class Diffusion(object):
                         ema.update(model, t)
                 
                 if step % self.config.training.sample_freq == 0:
-                    model.eval()
                     path = os.path.join(self.args.log_path, '%d.png' % step)
                     self.sample_image(ema.module, path)
+                    if self.config.diffusion.learn_alpha:  
+                        path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
+                        self.sample_image(model, path2)
 
                 if step % self.config.training.snapshot_freq == 0:
                     states = [
@@ -243,18 +245,15 @@ class Diffusion(object):
                     if self.config.model.ema:
                         states.append(ema.state_dict())
 
-                    # torch.save(
-                    #     states,
-                    #     os.path.join(self.args.log_path, "ckpt_{}.pth".format(step)),
-                    # )
                     torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
-                
-                # model[t].to('cpu')
-                # torch.cuda.empty_cache()  
+                 
                 data_start = time.time()
     
     def sample(self):
-        model, _ = self.create_model()
+        model, ema = self.create_model()
+        if not self.config.diffusion.learn_alpha:
+            model = ema.module
+        model.eval()
         self.sample_image(model, os.path.join(self.args.image_folder, f"sample.png"))
 
     def sample_image(self, model, path):
@@ -271,14 +270,17 @@ class Diffusion(object):
 
         # NOTE: This means that we are producing each predicted x0, not x_{t-1} at timestep t.
         with torch.no_grad():
+            model.eval()
             x = model.sample(x)
-
+            model.train()
+            
         x = inverse_data_transform(config, x)
         save_image(x, path, nrow=16)
             
     def fid(self):
-        _, ema = self.create_model()
-        model = ema.module
+        model, ema = self.create_model()
+        if not self.config.diffusion.learn_alpha:
+            model = ema.module
         model.eval()
         config = self.config.eval
         with torch.no_grad():

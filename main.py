@@ -13,7 +13,7 @@ from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
 import os  
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"  
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"  
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
