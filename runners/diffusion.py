@@ -251,7 +251,7 @@ class Diffusion(object):
     
     def sample(self):
         model, ema = self.create_model()
-        if not self.config.diffusion.learn_alpha:
+        if not self.args.model:
             model = ema.module
         model.eval()
         self.sample_image(model, os.path.join(self.args.image_folder, f"sample.png"))
@@ -279,7 +279,7 @@ class Diffusion(object):
             
     def fid(self):
         model, ema = self.create_model()
-        if not self.config.diffusion.learn_alpha:
+        if not self.args.model:
             model = ema.module
         model.eval()
         config = self.config.eval
@@ -297,7 +297,8 @@ class Diffusion(object):
             images, config.fid_cache, num_images=config.num_images,
             use_torch=config.fid_use_torch, verbose=True)
         
-        print("Model(EMA): IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
+        model_name = "Model" if self.args.model else "Model(EMA)"
+        print(f"{model_name}: IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
 
     def fid2(self):
         _, ema = self.create_model()

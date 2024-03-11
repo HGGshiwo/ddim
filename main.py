@@ -13,7 +13,7 @@ from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
 import os  
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"  
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"  
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
@@ -52,11 +52,6 @@ def parse_args_and_config():
         "--resume_training", action="store_true", help="Whether to resume training"
     )
     parser.add_argument(
-        "--ni",
-        action="store_true",
-        help="No interaction. Suitable for Slurm Job launcher",
-    )
-    parser.add_argument(
         "--sample_type",
         type=str,
         default="generalized",
@@ -73,6 +68,11 @@ def parse_args_and_config():
         type=float,
         default=0.0,
         help="eta used to control the variances of sigma",
+    )
+    parser.add_argument(
+        "--model",
+        action="store_true",
+        help="use model to test fid",
     )
     args = parser.parse_args()
     

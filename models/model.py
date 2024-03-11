@@ -434,8 +434,13 @@ loss v3:
     3000
     Model(EMA): IS: 8.705(0.098), FID: 10.461
 loss v3, learn_alpha:
+    300
+    Model: IS: 6.881(0.097), FID: 33.209 
     700
-    Model(EMA): IS: 7.367(0.062), FID: 25.280
+    Model: IS: 7.367(0.062), FID: 25.280
+    1000
+    Model(EMA): IS: 7.156(0.062), FID: 32.943
+    Model: IS: 7.676(0.101), FID: 24.219
 loss v2, learn_alpha:
     Model(EMA): IS: 1.832(0.012), FID:440.912
 """
