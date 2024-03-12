@@ -311,23 +311,42 @@ class UnetBlock(_UnetBlock):
         learn_alpha = config.diffusion.learn_alpha
         self.pred_mean = config.training.train_type == "layer_v2" 
         self.sample_block = SampleBlock(betas, learn_alpha)
-    
-    def resize(self, x):
-        if self.resolution != x.shape[2] or self.resolution != x.shape[3]:
-            x = F.interpolate(x, size=(self.resolution, self.resolution), mode='bilinear', align_corners=False)
-        return x
+        self.output_size = config.model.output_size
+        if config.model.upsamp_with_conv:
+            self.up_sample = Upsample(3, True)
+        else:
+            self.up_sample = lambda x: F.interpolate(x, size=(self.output_size, self.output_size), align_corners=False)
         
+    def _resize(self, x, size):
+        if size != x.shape[2] or size != x.shape[3]:
+            x = F.interpolate(x, size=(size, size), mode='bilinear', align_corners=False)
+        return x
+    
+    def resize_input(self, x):
+        # 训练辅助函数，缩放输入
+        return self._resize(x, self.resolution)
+    
+    def resize_output(self, x):
+        # 训练辅助函数，缩放输出
+        return self._resize(x, self.output_size)
+        
+    def upsample_output(self, x):
+        if x.shape[2] != self.output_size:
+            x = self.up_sample(x)
+        return x
+    
     def forward(self, x, t, last_t=None):
         et = super().forward(x)
         if self.pred_mean:
             # layer t 是输入t, 输出t-1
             et = self.sample_block(et, x, t, last_t)
+        et = self.upsample_output(et)
         return et
     
     def sample(self, x, i, j):
-        x = self.resize(x)
         et = super().forward(x)
         x = self.sample_block(et, x, i, j)
+        et = self.upsample_output(et)
         return x
 
 class SampleBlock(nn.Module):
@@ -394,6 +413,7 @@ class Model(nn.Module):
         return self.models[str(i)]
     
     def sample(self, x):
+        x = self.models[0].resize_input(x)
         for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):        
             x = self.models[str(i)].sample(x, i, j)                
         return x
