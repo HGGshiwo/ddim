@@ -7,9 +7,11 @@ def layer_loss(
     e: torch.Tensor,
     b: torch.Tensor, 
     keepdim=False
-):
+):      
     a = (1-b).cumprod(dim=0)[t].view(-1, 1, 1, 1)
     x = x0 * a.sqrt() + e * (1.0 - a).sqrt()
+    x = model[t].resize(x)
+    e = model[t].resize(e)
     output = model(x, t)
     if keepdim:
         return (e - output).square().sum(dim=(1, 2, 3))

@@ -2,13 +2,12 @@ import math
 import torch
 import torch.nn as nn
 import copy
+import torch.nn.functional as F
 
 def compute_alpha(beta, t):
     beta = torch.cat([torch.zeros(1, requires_grad=False).to(beta.device), beta], dim=0)
     a = (1 - beta).cumprod(dim=0).index_select(0, t + 1).view(-1, 1, 1, 1)
     return a
-
-
 
 def nonlinearity(x):
     # swish
@@ -182,7 +181,7 @@ class _UnetBlock(nn.Module):
         attn_resolutions = config.model.attn_resolutions
         dropout = config.model.dropout
         in_channels = config.model.in_channels
-        resolution = config.data.image_size
+        resolution = config.model.input_size
         resamp_with_conv = config.model.resamp_with_conv
         num_timesteps = config.diffusion.num_diffusion_timesteps
         
@@ -312,6 +311,11 @@ class UnetBlock(_UnetBlock):
         learn_alpha = config.diffusion.learn_alpha
         self.pred_mean = config.training.train_type == "layer_v2" 
         self.sample_block = SampleBlock(betas, learn_alpha)
+    
+    def resize(self, x):
+        if self.resolution != x.shape[2] or self.resolution != x.shape[3]:
+            x = F.interpolate(x, size=(self.resolution, self.resolution), mode='bilinear', align_corners=False)
+        return x
         
     def forward(self, x, t, last_t=None):
         et = super().forward(x)
@@ -321,6 +325,7 @@ class UnetBlock(_UnetBlock):
         return et
     
     def sample(self, x, i, j):
+        x = self.resize(x)
         et = super().forward(x)
         x = self.sample_block(et, x, i, j)
         return x
@@ -441,6 +446,12 @@ loss v3, learn_alpha:
     1000
     Model(EMA): IS: 7.156(0.062), FID: 32.943
     Model: IS: 7.676(0.101), FID: 24.219
+    1600
+    Model(EMA): IS: 8.174(0.084), FID: 13.286
+    Model: IS: 7.921(0.124), FID: 19.502
+    2100
+    Model(EMA): IS: 8.384(0.127), FID: 10.051
+    Model: IS: 7.912(0.130), FID: 19.594
 loss v2, learn_alpha:
     Model(EMA): IS: 1.832(0.012), FID:440.912
 """
