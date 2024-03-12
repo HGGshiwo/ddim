@@ -34,7 +34,7 @@ model:
     ema_rate: 0.9999
     ema: True
     resamp_with_conv: True
-    upsamp_with_conv: True
+    upsamp_with_conv: False
     input_size: 
     - value: 32 
       num: 12

@@ -315,7 +315,7 @@ class UnetBlock(_UnetBlock):
         if config.model.upsamp_with_conv:
             self.up_sample = Upsample(3, True)
         else:
-            self.up_sample = lambda x: F.interpolate(x, size=(self.output_size, self.output_size), align_corners=False)
+            self.up_sample = lambda x: F.interpolate(x, size=(self.output_size, self.output_size), mode="bilinear", align_corners=False)
         
     def _resize(self, x, size):
         if size != x.shape[2] or size != x.shape[3]:
@@ -346,7 +346,7 @@ class UnetBlock(_UnetBlock):
     def sample(self, x, i, j):
         et = super().forward(x)
         x = self.sample_block(et, x, i, j)
-        et = self.upsample_output(et)
+        x = self.upsample_output(x)
         return x
 
 class SampleBlock(nn.Module):
@@ -413,7 +413,7 @@ class Model(nn.Module):
         return self.models[str(i)]
     
     def sample(self, x):
-        x = self.models[0].resize_input(x)
+        x = self.models[str(self.seq[-1])].resize_input(x)
         for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):        
             x = self.models[str(i)].sample(x, i, j)                
         return x
