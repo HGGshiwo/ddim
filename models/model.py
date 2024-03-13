@@ -15,11 +15,7 @@ def nonlinearity(x):
 
 
 def Normalize(in_channels):
-    if in_channels % 16 == 0:
-        num_groups = 16
-    else:
-        num_groups = in_channels
-    return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
+    return torch.nn.GroupNorm(num_groups=16, num_channels=in_channels, eps=1e-6, affine=True)
 
 
 class Upsample(nn.Module):
@@ -317,11 +313,9 @@ class UnetBlock(_UnetBlock):
         self.sample_block = SampleBlock(betas, learn_alpha)
         self.output_size = config.model.output_size
         self.upsamp_with_conv = config.model.upsamp_with_conv
-        if config.model.upsamp_with_conv:
-            self.res2 = ResnetBlock(in_channels=3, 
-                                    out_channels=3, 
-                                    dropout=config.model.dropout)
-
+        if self.upsamp_with_conv:
+            self.res_block = SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
+    
     def _resize(self, x, size):
         if size != x.shape[2] or size != x.shape[3]:
             x = F.interpolate(x, size=(size, size), mode='bicubic', align_corners=False)
@@ -339,7 +333,7 @@ class UnetBlock(_UnetBlock):
         if x.shape[2] != self.output_size:
             x = F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
             if self.upsamp_with_conv:
-                x = self.res2(x)
+                x = self.res_block(x)
         return x
     
     def forward(self, x, t, last_t=None):
@@ -356,6 +350,7 @@ class UnetBlock(_UnetBlock):
         x = self.sample_block(et, x, i, j)
         x = self.upsample_output(x)
         return x
+
 
 class SampleBlock(nn.Module):
     def __init__(self, betas, learn_alpha) -> None:
@@ -381,7 +376,66 @@ class SampleBlock(nn.Module):
             a, b = embd_a + a, embd_b + b
         x = a * x + b * et
         return x
-        
+
+
+class SRResBlock(nn.Module):
+    def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
+                 dropout):
+        super().__init__()
+        self.in_channels = in_channels
+        out_channels = in_channels if out_channels is None else out_channels
+        self.out_channels = out_channels
+        self.use_conv_shortcut = conv_shortcut
+
+        self.norm1 = nn.InstanceNorm2d(in_channels, affine=True)
+        self.conv1 = torch.nn.Conv2d(in_channels,
+                                     out_channels,
+                                     kernel_size=3,
+                                     stride=1,
+                                     padding=1,
+                                     bias=False)
+
+        self.norm2 = nn.InstanceNorm2d(out_channels)
+        self.dropout = torch.nn.Dropout(dropout)
+        self.conv2 = torch.nn.Conv2d(out_channels,
+                                     out_channels,
+                                     kernel_size=3,
+                                     stride=1,
+                                     padding=1,
+                                     bias=False)
+        if self.in_channels != self.out_channels:
+            if self.use_conv_shortcut:
+                self.conv_shortcut = torch.nn.Conv2d(in_channels,
+                                                     out_channels,
+                                                     kernel_size=3,
+                                                     stride=1,
+                                                     padding=1,
+                                                     bias=False)
+            else:
+                self.nin_shortcut = torch.nn.Conv2d(in_channels,
+                                                    out_channels,
+                                                    kernel_size=1,
+                                                    stride=1,
+                                                    padding=0,
+                                                    bias=False)
+    def forward(self, x):
+        h = x
+        h = self.norm1(h)
+        h = nonlinearity(h)
+        h = self.conv1(h)
+
+        h = self.norm2(h)
+        h = nonlinearity(h)
+        h = self.dropout(h)
+        h = self.conv2(h)
+
+        if self.in_channels != self.out_channels:
+            if self.use_conv_shortcut:
+                x = self.conv_shortcut(x)
+            else:
+                x = self.nin_shortcut(x)
+        return x+h
+
 
 class Model(nn.Module):
     def __init__(self, config, betas, seq):
