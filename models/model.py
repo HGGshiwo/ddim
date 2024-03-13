@@ -315,11 +315,11 @@ class UnetBlock(_UnetBlock):
         if config.model.upsamp_with_conv:
             self.up_sample = Upsample(3, True)
         else:
-            self.up_sample = lambda x: F.interpolate(x, size=(self.output_size, self.output_size), mode="bilinear", align_corners=False)
+            self.up_sample = lambda x: F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
         
     def _resize(self, x, size):
         if size != x.shape[2] or size != x.shape[3]:
-            x = F.interpolate(x, size=(size, size), mode='bilinear', align_corners=False)
+            x = F.interpolate(x, size=(size, size), mode='bicubic', align_corners=False)
         return x
     
     def resize_input(self, x):
@@ -344,6 +344,7 @@ class UnetBlock(_UnetBlock):
         return et
     
     def sample(self, x, i, j):
+        x = self.resize_input(x)
         et = super().forward(x)
         x = self.sample_block(et, x, i, j)
         x = self.upsample_output(x)
@@ -450,6 +451,10 @@ class Model(nn.Module):
 loss v2:
     1000
     Model(EMA): IS: 4.077(0.040), FID:122.615
+loss v2, scale:
+    1000
+    Model: IS: 2.693(0.020), FID:186.341
+    Model(EMA): IS: 2.980(0.018), FID:164.365
 loss v3:
     890
     Model(EMA): IS: 4.432(0.023), FID:108.831

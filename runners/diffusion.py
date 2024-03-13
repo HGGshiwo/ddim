@@ -231,9 +231,8 @@ class Diffusion(object):
                 if step % self.config.training.sample_freq == 0:
                     path = os.path.join(self.args.log_path, '%d.png' % step)
                     self.sample_image(ema.module, path)
-                    if self.config.diffusion.learn_alpha:  
-                        path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
-                        self.sample_image(model, path2)
+                    path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
+                    self.sample_image(model, path2)
 
                 if step % self.config.training.snapshot_freq == 0:
                     states = [
