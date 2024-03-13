@@ -15,7 +15,11 @@ def nonlinearity(x):
 
 
 def Normalize(in_channels):
-    return torch.nn.GroupNorm(num_groups=16, num_channels=in_channels, eps=1e-6, affine=True)
+    if in_channels % 16 == 0:
+        num_groups = 16
+    else:
+        num_groups = in_channels
+    return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
 
 
 class Upsample(nn.Module):
@@ -312,11 +316,12 @@ class UnetBlock(_UnetBlock):
         self.pred_mean = config.training.train_type == "layer_v2" 
         self.sample_block = SampleBlock(betas, learn_alpha)
         self.output_size = config.model.output_size
+        self.upsamp_with_conv = config.model.upsamp_with_conv
         if config.model.upsamp_with_conv:
-            self.up_sample = Upsample(3, True)
-        else:
-            self.up_sample = lambda x: F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
-        
+            self.res2 = ResnetBlock(in_channels=3, 
+                                    out_channels=3, 
+                                    dropout=config.model.dropout)
+
     def _resize(self, x, size):
         if size != x.shape[2] or size != x.shape[3]:
             x = F.interpolate(x, size=(size, size), mode='bicubic', align_corners=False)
@@ -332,7 +337,9 @@ class UnetBlock(_UnetBlock):
         
     def upsample_output(self, x):
         if x.shape[2] != self.output_size:
-            x = self.up_sample(x)
+            x = F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
+            if self.upsamp_with_conv:
+                x = self.res2(x)
         return x
     
     def forward(self, x, t, last_t=None):

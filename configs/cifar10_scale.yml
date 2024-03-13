@@ -15,18 +15,8 @@ model:
     block_type: "UnetBlock"
     in_channels: 3
     out_ch: 3
-    ch_num: 
-    - value: 128
-      num: 16
-    - value: 64
-      num: 2
-    - value: 32
-      num: 2
-    ch_mult: 
-    - value: [1, 2, 2, 2]
-      num: 16
-    - value: [1, 2]
-      num: 4
+    ch_num: 128
+    ch_mult: [1, 2, 2, 2]
     num_res_blocks: 2
     attn_resolutions: [16, ]
     dropout: 0.1
@@ -34,7 +24,7 @@ model:
     ema_rate: 0.9999
     ema: True
     resamp_with_conv: True
-    upsamp_with_conv: False
+    upsamp_with_conv: True
     input_size: 
     - value: 32 
       num: 12
