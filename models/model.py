@@ -314,6 +314,7 @@ class UnetBlock(_UnetBlock):
                 assert output_size % input_size == 0
                 scale_rate = output_size // input_size
                 config.model.out_ch *= scale_rate * scale_rate
+    
         super().__init__(config)
         learn_alpha = config.diffusion.learn_alpha
         self.pred_mean = config.training.train_type == "layer_v2" 
@@ -323,7 +324,10 @@ class UnetBlock(_UnetBlock):
         if self.upsamp_type == "bicubic_res":
             self.res_block = SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
         elif self.upsamp_type == "pixel_shuffle":
-            self.pixel_shuffle = nn.PixelShuffle(2)
+            self.pixel_shuffle = nn.Sequential(
+                nn.PixelShuffle(2),
+                SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
+            )
     
     def _resize(self, x, size):
         if size != x.shape[2] or size != x.shape[3]:
@@ -338,29 +342,33 @@ class UnetBlock(_UnetBlock):
         # 训练辅助函数，缩放输出
         return self._resize(x, self.output_size)
         
-    def upsample_output(self, x):
+    def post_upsample(self, x):
         if x.shape[2] != self.output_size:
-            if self.upsamp_type == "pixel_shuffle":
-                x = self.pixel_shuffle(x)
-            else:
-                x = F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
-                if self.upsamp_type == "bicubic_res":
-                    x = self.res_block(x)
+            x = F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
+            if self.upsamp_type == "bicubic_res":
+                x = self.res_block(x)
         return x
-    
-    def forward(self, x, t, last_t=None):
+
+    def forward_with_shuffle(self, x):
         et = super().forward(x)
+        if et.shape[1] != 3:
+            et = self.pixel_shuffle(et)
+            x = F.interpolate(x, size=(self.output_size, self.output_size), mode='bicubic', align_corners=False)
+        return et, x 
+
+    def forward(self, x, t, last_t=None):
+        et, x = self.forward_with_shuffle(x)
         if self.pred_mean:
             # layer t 是输入t, 输出t-1
             et = self.sample_block(et, x, t, last_t)
-        et = self.upsample_output(et)
+        et = self.post_upsample(et)
         return et
     
     def sample(self, x, i, j):
         x = self.resize_input(x)
-        et = super().forward(x)
+        et, x = self.forward_with_shuffle(x)
         x = self.sample_block(et, x, i, j)
-        x = self.upsample_output(x)
+        x = self.post_upsample(x)
         return x
 
 
