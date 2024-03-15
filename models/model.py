@@ -307,14 +307,23 @@ class _UnetBlock(nn.Module):
 
 class UnetBlock(_UnetBlock):
     def __init__(self, config, betas) -> None:
+        input_size, output_size = config.model.input_size, config.model.output_size
+        if input_size != output_size:
+            assert config.model.upsamp_type in ["bicubic_res", "pixel_shuffle", "bicubic"]
+            if config.model.upsamp_type == "pixel_shuffle":
+                assert output_size % input_size == 0
+                scale_rate = output_size // input_size
+                config.model.out_ch *= scale_rate * scale_rate
         super().__init__(config)
         learn_alpha = config.diffusion.learn_alpha
         self.pred_mean = config.training.train_type == "layer_v2" 
         self.sample_block = SampleBlock(betas, learn_alpha)
         self.output_size = config.model.output_size
-        self.upsamp_with_conv = config.model.upsamp_with_conv
-        if self.upsamp_with_conv:
+        self.upsamp_type = config.model.upsamp_type
+        if self.upsamp_type == "bicubic_res":
             self.res_block = SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
+        elif self.upsamp_type == "pixel_shuffle":
+            self.pixel_shuffle = nn.PixelShuffle(2)
     
     def _resize(self, x, size):
         if size != x.shape[2] or size != x.shape[3]:
@@ -331,9 +340,12 @@ class UnetBlock(_UnetBlock):
         
     def upsample_output(self, x):
         if x.shape[2] != self.output_size:
-            x = F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
-            if self.upsamp_with_conv:
-                x = self.res_block(x)
+            if self.upsamp_type == "pixel_shuffle":
+                x = self.pixel_shuffle(x)
+            else:
+                x = F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
+                if self.upsamp_type == "bicubic_res":
+                    x = self.res_block(x)
         return x
     
     def forward(self, x, t, last_t=None):
@@ -516,6 +528,12 @@ loss v2, scale:
     1000
     Model: IS: 2.693(0.020), FID:186.341
     Model(EMA): IS: 2.980(0.018), FID:164.365
+    800
+    Model(EMA): IS: 5.115(0.051), FID:102.984 
+    Model: IS: 5.118(0.089), FID: 95.512
+    2000
+    Model: IS: 5.432(0.063), FID: 88.983    
+    Model(EMA): IS: 5.838(0.064), FID: 77.194 
 loss v3:
     890
     Model(EMA): IS: 4.432(0.023), FID:108.831

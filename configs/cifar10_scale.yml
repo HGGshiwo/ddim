@@ -24,21 +24,21 @@ model:
     ema_rate: 0.9999
     ema: True
     resamp_with_conv: True
-    upsamp_with_conv: True
+    upsamp_type: pixel_shuffle # bicubic, bicubic_res, pixel_shuffle
     input_size: 
     - value: 32 
       num: 12
-    - value: 24
+    - value: 16
       num: 4
-    - value: 16 
+    - value: 8
       num: 4
     output_size: 
     - value: 32
-      num: 12
-    - value: 24 
-      num: 4
+      num: 13
     - value: 16 
       num: 4
+    - value: 8 
+      num: 3
 
 diffusion:
     beta_schedule: linear
