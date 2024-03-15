@@ -15,8 +15,16 @@ model:
     block_type: "UnetBlock"
     in_channels: 3
     out_ch: 3
-    ch_num: 128
-    ch_mult: [1, 2, 2, 2]
+    ch_num: 
+    - value: 256
+      num: 5
+    - value: 128
+      num: 5
+    - value: 32
+      num: 5
+    - value: 16
+      num: 5
+    ch_mult: [1, 2]
     num_res_blocks: 2
     attn_resolutions: [16, ]
     dropout: 0.1

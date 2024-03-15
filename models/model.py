@@ -15,7 +15,13 @@ def nonlinearity(x):
 
 
 def Normalize(in_channels):
-    return torch.nn.GroupNorm(num_groups=16, num_channels=in_channels, eps=1e-6, affine=True)
+    if in_channels % 16 == 0:
+        num_groups = 16
+    elif in_channels % 8 == 0:
+        num_groups = 8
+    else:
+        num_groups = in_channels
+    return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
 
 
 class Upsample(nn.Module):
@@ -320,14 +326,15 @@ class UnetBlock(_UnetBlock):
         self.pred_mean = config.training.train_type == "layer_v2" 
         self.sample_block = SampleBlock(betas, learn_alpha)
         self.output_size = config.model.output_size
-        self.upsamp_type = config.model.upsamp_type
-        if self.upsamp_type == "bicubic_res":
-            self.res_block = SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
-        elif self.upsamp_type == "pixel_shuffle":
-            self.pixel_shuffle = nn.Sequential(
-                nn.PixelShuffle(2),
-                SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
-            )
+        if input_size != output_size:
+            self.upsamp_type = config.model.upsamp_type
+            if self.upsamp_type == "bicubic_res":
+                self.res_block = SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
+            elif self.upsamp_type == "pixel_shuffle":
+                self.pixel_shuffle = nn.Sequential(
+                    nn.PixelShuffle(2),
+                    SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
+                )
     
     def _resize(self, x, size):
         if size != x.shape[2] or size != x.shape[3]:
@@ -515,6 +522,7 @@ class Model(nn.Module):
 20:
     3000? 
     Model(EMA): IS: 8.678(0.076), FID: 10.453
+    Model: IS: 8.146(0.114), FID: 17.749
 50:    
     4000
     Model(EMA): IS: 8.188(0.126), FID: 13.217
@@ -527,6 +535,7 @@ class Model(nn.Module):
     8700
     Model(EMA): IS: 8.711(0.096), FID:  8.929
     10000
+    Model: IS: 8.332(0.067), FID: 13.132 
     Model(EMA): IS: 8.755(0.100), FID:  8.814
 20:
 loss v2:
