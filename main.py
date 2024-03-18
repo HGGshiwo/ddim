@@ -91,7 +91,7 @@ def parse_args_and_config():
             os.makedirs(args.log_path)
 
             with open(os.path.join(args.log_path, "config.yml"), "w") as f:
-                yaml.dump(new_config, f, default_flow_style=False)
+                yaml.dump(config, f, default_flow_style=False)
 
         # setup logger
         level = getattr(logging, args.verbose.upper(), None)
@@ -132,6 +132,12 @@ def parse_args_and_config():
             )
             if not os.path.exists(args.image_folder):
                 os.makedirs(args.image_folder)
+        
+        if args.fid and hasattr(new_config.sampling, "ckpt"):
+            if not os.path.exists(args.log_path):
+                os.makedirs(args.log_path)
+                with open(os.path.join(args.log_path, "config.yml"), "w") as f:
+                    yaml.dump(config, f, default_flow_style=False)
 
     # add device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")

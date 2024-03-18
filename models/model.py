@@ -575,4 +575,7 @@ loss v3, learn_alpha:
     Model: IS: 7.912(0.130), FID: 19.594
 loss v2, learn_alpha:
     Model(EMA): IS: 1.832(0.012), FID:440.912
+    
+best:
+    Model(EMA): IS: 8.762(0.120), FID: 11.739 (428394012)
 """

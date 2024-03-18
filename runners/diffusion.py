@@ -101,24 +101,46 @@ class Diffusion(object):
 
         skip = self.num_timesteps // self.config.diffusion.num_block
         self.seq = range(0, self.num_timesteps, skip)
+        
+    def get_states(self):
+        if hasattr(self.config.sampling, "ckpt"):
+            if os.path.exists(os.path.join(self.args.log_path, "ckpt.pth")):
+                return torch.load(os.path.join(self.args.log_path, "ckpt.pth"))
+            
+            ckpt = self.config.sampling.ckpt
+            ckpt_list = []
+            for c in ckpt:
+                ckpt_list.extend([c['value']]*c['num'])
+            assert len(ckpt_list) == len(self.seq), f"{len(ckpt_list)}, {len(self.seq)}"
+            states = [{} for i in range(2)]
+            for layer_name, doc in zip(self.seq, ckpt_list):
+                _state = torch.load(f"./exp/logs/{doc}/ckpt.pth", map_location=self.config.device)
+                for i in [0, -1]:
+                    for k, v in _state[i].items():  
+                        if f"models.{layer_name}." in k:  
+                            states[i][k] = v.clone()
+                del _state
+            torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
+            return states  
+        else:
+            if self.config.use_pretrained:
+                ckpt_path = os.path.join("exp", f"model-790000.ckpt")
+            else:
+                ckpt_path = os.path.join(self.args.log_path, "ckpt.pth")
+            states = torch.load(ckpt_path, map_location=self.config.device)
+        return states
 
     def create_model(self):
         if self.config.use_pretrained:
             model = UNet(self.config, self.betas, self.seq) 
-            states = torch.load(
-                os.path.join("exp", f"model-790000.ckpt"),
-                map_location=self.config.device,
-            )
+            states = self.get_states()
             model.load_state_dict(states, strict=True)
             model = model.to(self.device)
             ema = ModelEma(model, decay=self.config.model.ema_rate)
         else:
             model = Model(self.config, self.betas, self.seq)
             if not self.args.train:
-                states = torch.load(
-                    os.path.join(self.args.log_path, "ckpt.pth"),
-                    map_location=self.config.device,
-                )
+                states = self.get_states()
                 model.load_state_dict(states[0], strict=True)
             
             model = model.to(self.device)
