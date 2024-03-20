@@ -196,7 +196,7 @@ class AttnBlock(nn.Module):
 class Model(nn.Module):
     def __init__(self, config, betas, seq):
         super().__init__()
-        ch, out_ch, ch_mult = config.model.ch, config.model.out_ch, tuple(config.model.ch_mult)
+        ch, out_ch, ch_mult = config.model.ch_num, config.model.out_ch, tuple(config.model.ch_mult)
         num_res_blocks = config.model.num_res_blocks
         attn_resolutions = config.model.attn_resolutions
         dropout = config.model.dropout
@@ -306,6 +306,7 @@ class Model(nn.Module):
         assert x.shape[2] == x.shape[3] == self.resolution
 
         # timestep embedding
+        t = torch.ones(x.shape[0]).to(x.device) * t
         temb = get_timestep_embedding(t, self.ch)
         temb = self.temb.dense[0](temb)
         temb = nonlinearity(temb)

@@ -138,7 +138,8 @@ class Diffusion(object):
             model = model.to(self.device)
             ema = ModelEma(model, decay=self.config.model.ema_rate)
         else:
-            model = Model(self.config, self.betas, self.seq)
+            model_class = UNet if self.config.model.use_time_embed else Model
+            model = model_class(self.config, self.betas, self.seq)
             if not self.args.train:
                 states = self.get_states()
                 model.load_state_dict(states[0], strict=True)
@@ -233,7 +234,9 @@ class Diffusion(object):
                 optimizer.zero_grad()
                 loss.backward()
 
-                if self.config.training.train_type == "end2end":
+                use_whole_model = self.config.training.train_type == "end2end" or self.config.model.use_time_embed
+
+                if use_whole_model:
                     torch.nn.utils.clip_grad_norm_(
                         model.parameters(), config.optim.grad_clip
                     )
@@ -245,7 +248,7 @@ class Diffusion(object):
                 optimizer.step()
 
                 if self.config.model.ema:
-                    if self.config.training.train_type == "end2end":
+                    if use_whole_model:
                         ema.update(model)
                     else:
                         ema.update(model, t)

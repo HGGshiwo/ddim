@@ -10,8 +10,6 @@ def layer_loss(
 ):      
     a = (1-b).cumprod(dim=0)[t].view(-1, 1, 1, 1)
     x = x0 * a.sqrt() + e * (1.0 - a).sqrt()
-    x = model[t].resize_input(x)
-    e = model[t].resize_output(e)
     
     output = model(x, t)
     if keepdim:

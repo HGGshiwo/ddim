@@ -312,70 +312,37 @@ class _UnetBlock(nn.Module):
 
 
 class UnetBlock(_UnetBlock):
-    def __init__(self, config, betas) -> None:
-        input_size, output_size = config.model.input_size, config.model.output_size
-        if input_size != output_size:
-            assert config.model.upsamp_type in ["bicubic_res", "pixel_shuffle", "bicubic"]
-            if config.model.upsamp_type == "pixel_shuffle":
-                assert output_size % input_size == 0
-                scale_rate = output_size // input_size
-                config.model.out_ch *= scale_rate * scale_rate
-    
+    def __init__(self, config, betas) -> None:    
         super().__init__(config)
         learn_alpha = config.diffusion.learn_alpha
         self.pred_mean = config.training.train_type == "layer_v2" 
         self.sample_block = SampleBlock(betas, learn_alpha)
         self.output_size = config.model.output_size
-        if input_size != output_size:
-            self.upsamp_type = config.model.upsamp_type
-            if self.upsamp_type == "bicubic_res":
-                self.res_block = SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
-            elif self.upsamp_type == "pixel_shuffle":
-                self.pixel_shuffle = nn.Sequential(
-                    nn.PixelShuffle(2),
-                    SRResBlock(in_channels=3, out_channels=3, dropout=config.model.dropout)
-                )
-    
-    def _resize(self, x, size):
-        if size != x.shape[2] or size != x.shape[3]:
-            x = F.interpolate(x, size=(size, size), mode='bicubic', align_corners=False)
-        return x
-    
-    def resize_input(self, x):
-        # 训练辅助函数，缩放输入
-        return self._resize(x, self.resolution)
-    
-    def resize_output(self, x):
-        # 训练辅助函数，缩放输出
-        return self._resize(x, self.output_size)
+        self.in_ch = config.model.in_channels
+        self.out_ch = config.model.out_ch
+        if self.in_ch != 3:
+            self.pixel_unshuffle = nn.PixelUnshuffle(2)
+        if  self.out_ch != 3:
+            self.pixel_shuffle = nn.PixelShuffle(2)
         
-    def post_upsample(self, x):
-        if x.shape[2] != self.output_size:
-            x = F.interpolate(x, size=(self.output_size, self.output_size), mode="bicubic", align_corners=False)
-            if self.upsamp_type == "bicubic_res":
-                x = self.res_block(x)
-        return x
-
     def forward_with_shuffle(self, x):
+        if self.in_ch != 3:
+            x = self.pixel_unshuffle(x)
         et = super().forward(x)
-        if et.shape[1] != 3:
+        if self.out_ch != 3:
             et = self.pixel_shuffle(et)
-            x = F.interpolate(x, size=(self.output_size, self.output_size), mode='bicubic', align_corners=False)
-        return et, x 
+        return et
 
     def forward(self, x, t, last_t=None):
-        et, x = self.forward_with_shuffle(x)
+        et = self.forward_with_shuffle(x)
         if self.pred_mean:
             # layer t 是输入t, 输出t-1
             et = self.sample_block(et, x, t, last_t)
-        et = self.post_upsample(et)
         return et
     
     def sample(self, x, i, j):
-        x = self.resize_input(x)
-        et, x = self.forward_with_shuffle(x)
+        et = self.forward_with_shuffle(x)
         x = self.sample_block(et, x, i, j)
-        x = self.post_upsample(x)
         return x
 
 
@@ -403,65 +370,6 @@ class SampleBlock(nn.Module):
             a, b = embd_a + a, embd_b + b
         x = a * x + b * et
         return x
-
-
-class SRResBlock(nn.Module):
-    def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
-                 dropout):
-        super().__init__()
-        self.in_channels = in_channels
-        out_channels = in_channels if out_channels is None else out_channels
-        self.out_channels = out_channels
-        self.use_conv_shortcut = conv_shortcut
-
-        self.norm1 = nn.InstanceNorm2d(in_channels, affine=True)
-        self.conv1 = torch.nn.Conv2d(in_channels,
-                                     out_channels,
-                                     kernel_size=3,
-                                     stride=1,
-                                     padding=1,
-                                     bias=False)
-
-        self.norm2 = nn.InstanceNorm2d(out_channels)
-        self.dropout = torch.nn.Dropout(dropout)
-        self.conv2 = torch.nn.Conv2d(out_channels,
-                                     out_channels,
-                                     kernel_size=3,
-                                     stride=1,
-                                     padding=1,
-                                     bias=False)
-        if self.in_channels != self.out_channels:
-            if self.use_conv_shortcut:
-                self.conv_shortcut = torch.nn.Conv2d(in_channels,
-                                                     out_channels,
-                                                     kernel_size=3,
-                                                     stride=1,
-                                                     padding=1,
-                                                     bias=False)
-            else:
-                self.nin_shortcut = torch.nn.Conv2d(in_channels,
-                                                    out_channels,
-                                                    kernel_size=1,
-                                                    stride=1,
-                                                    padding=0,
-                                                    bias=False)
-    def forward(self, x):
-        h = x
-        h = self.norm1(h)
-        h = nonlinearity(h)
-        h = self.conv1(h)
-
-        h = self.norm2(h)
-        h = nonlinearity(h)
-        h = self.dropout(h)
-        h = self.conv2(h)
-
-        if self.in_channels != self.out_channels:
-            if self.use_conv_shortcut:
-                x = self.conv_shortcut(x)
-            else:
-                x = self.nin_shortcut(x)
-        return x+h
 
 
 class Model(nn.Module):
@@ -502,7 +410,6 @@ class Model(nn.Module):
         return self.models[str(i)]
     
     def sample(self, x):
-        x = self.models[str(self.seq[-1])].resize_input(x)
         for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):        
             x = self.models[str(i)].sample(x, i, j)                
         return x
