@@ -430,6 +430,10 @@ class Model(nn.Module):
     3000? 
     Model(EMA): IS: 8.678(0.076), FID: 10.453
     Model: IS: 8.146(0.114), FID: 17.749
+    
+    scale:
+    1600 
+    Model(EMA): IS: 8.248(0.106), FID: 18.247
 50:    
     4000
     Model(EMA): IS: 8.188(0.126), FID: 13.217
@@ -444,6 +448,12 @@ class Model(nn.Module):
     10000
     Model: IS: 8.332(0.067), FID: 13.132 
     Model(EMA): IS: 8.755(0.100), FID:  8.814
+100(use_time_embed):
+    1600
+    Model(EMA): IS: 8.858(0.055), FID:  9.743
+250(use_time_embed)
+    1300
+    Model(EMA): IS: 8.572(0.097), FID:  8.769
 20:
 loss v2:
     1000
@@ -457,7 +467,7 @@ loss v2, scale:
     Model: IS: 5.118(0.089), FID: 95.512
     2000
     Model: IS: 5.432(0.063), FID: 88.983    
-    Model(EMA): IS: 5.838(0.064), FID: 77.194 
+    Model(EMA): IS: 5.838(0.064), FID: 77.194
 loss v3:
     890
     Model(EMA): IS: 4.432(0.023), FID:108.831
@@ -485,4 +495,8 @@ loss v2, learn_alpha:
     
 best:
     Model(EMA): IS: 8.762(0.120), FID: 11.739 (428394012)
+    Model(EMA): IS: 8.580(0.084), FID: 13.226 (252986612)
+    Model(EMA): IS: 8.768(0.107), FID: 10.879 (336919884)
+    x3:
+    Model(EMA): IS: 8.627(0.083), FID: 12.033 (364173740)
 """

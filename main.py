@@ -13,7 +13,7 @@ from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
 import os  
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"  
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
@@ -83,6 +83,7 @@ def parse_args_and_config():
     # parse config file
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
+ 
     new_config = dict2namespace(config)
 
     args.train = not args.sample and not args.loss and not args.fid 
