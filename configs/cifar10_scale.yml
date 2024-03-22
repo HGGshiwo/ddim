@@ -27,7 +27,7 @@ model:
     upsamp_type: pixel_shuffle # bicubic, bicubic_res, pixel_shuffle
     input_size: 16
     output_size: 16
-    use_time_embed: True
+    use_time_embed: False
 
 diffusion:
     beta_schedule: linear

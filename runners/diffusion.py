@@ -112,13 +112,21 @@ class Diffusion(object):
             for c in ckpt:
                 ckpt_list.extend([c['value']]*c['num'])
             assert len(ckpt_list) == len(self.seq), f"{len(ckpt_list)}, {len(self.seq)}"
-            states = [{} for i in range(2)]
+            # 建立索引
+            src_states = {}
             for layer_name, doc in zip(self.seq, ckpt_list):
+                if doc not in src_states:
+                    src_states[doc] = []
+                src_states[doc].append(layer_name)
+                
+            states = [{} for i in range(2)]
+            for doc, layers in src_states.items():
                 _state = torch.load(f"./exp/logs/{doc}/ckpt.pth", map_location=self.config.device)
-                for i in [0, -1]:
-                    for k, v in _state[i].items():  
-                        if f"models.{layer_name}." in k:  
-                            states[i][k] = v.clone()
+                for layer_name in layers:
+                    for i in [0, -1]:
+                        for k, v in _state[i].items():  
+                            if f"models.{layer_name}." in k:  
+                                states[i][k] = v.clone()
                 del _state
             torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
             return states  

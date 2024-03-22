@@ -11,29 +11,12 @@ data:
     num_workers: 4
 
 model:
-    use_time_embed: False
     type: "simple"
     block_type: "UnetBlock"
     in_channels: 3
     out_ch: 3
-    ch_num: 
-      - value: 64
-        num: 1
-      - value: 128
-        num: 9
-      - value: 32 
-        num: 5
-      - value: 16
-        num: 5
-
-    ch_mult:
-      - value: [1, 2]
-        num: 1
-      - value: [1, 2, 2, 2]
-        num: 9
-      - value: [1, 2]
-        num: 10
-
+    ch_num: 128
+    ch_mult: [1, 2, 2, 2]
     num_res_blocks: 2
     attn_resolutions: [16, ]
     dropout: 0.1
@@ -44,13 +27,14 @@ model:
     upsamp_type: None
     input_size: 32
     output_size: 32
+    use_time_embed: True
 
 diffusion:
     beta_schedule: linear
     beta_start: 0.0001
     beta_end: 0.02
     num_diffusion_timesteps: 1000
-    num_block: 20
+    num_block: 100
     learn_alpha: false
 
 
@@ -64,13 +48,6 @@ training:
 
 sampling:
     batch_size: 256
-    ckpt: 
-      - value: "2024-03-15-13-50-53"
-        num: 1
-      - value: "2024-02-24-15-21-43"
-        num: 9
-      - value: "2024-03-15-14-04-46"
-        num: 10
 
 eval:
     num_images: 50000
