@@ -434,6 +434,10 @@ class Model(nn.Module):
     scale:
     1600 
     Model(EMA): IS: 8.248(0.106), FID: 18.247
+    2700
+    Model(EMA): IS: 8.533(0.068), FID: 16.048
+    3900
+    Model(EMA): IS: 8.597(0.105), FID: 16.380
 50:    
     4000
     Model(EMA): IS: 8.188(0.126), FID: 13.217
@@ -451,9 +455,24 @@ class Model(nn.Module):
 100(use_time_embed):
     1600
     Model(EMA): IS: 8.858(0.055), FID:  9.743
+    2100
+    Model(EMA): IS: 9.208(0.113), FID:  6.522
+    4100
+    Model(EMA): IS: 9.316(0.094), FID:  5.644
+    5200
+    Model(EMA): IS: 9.185(0.078), FID:  5.404
+    (ddim)
+    frechet_inception_distance: 5.605276
+    frechet_inception_distance: 5.605047 (不算最后一步)
 250(use_time_embed)
     1300
     Model(EMA): IS: 8.572(0.097), FID:  8.769
+    1900
+    Model(EMA): IS: 8.728(0.103), FID:  7.363 
+    3000 
+    Model(EMA): IS: 8.909(0.089), FID:  6.321 
+    4100
+    Model(EMA): IS: 8.966(0.112), FID:  5.896 
 20:
 loss v2:
     1000
