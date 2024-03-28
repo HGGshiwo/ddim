@@ -20,7 +20,7 @@ from torchvision.utils import make_grid, save_image
 import random
 from tqdm import trange
 import torch.utils.tensorboard as tb
-
+import copy
 
 def torch2hwcuint8(x, clip=False):
     if clip:
@@ -179,6 +179,15 @@ class Diffusion(object):
         model, ema = self.create_model()
         optimizer = get_optimizer(self.config, model.parameters())
     
+        t_index = 0 
+        seq = self.seq[1:]
+        seq_next = self.seq[:-1]
+
+        if hasattr(self.config.training, "layer"):
+            train_layer = self.config.training.layer
+            seq = [self.seq[i] for i in train_layer]
+            seq_next = [self.seq[i-1] for i in train_layer]
+
         start_epoch, step = 0, 0
         if self.args.resume_training:
             states = torch.load(os.path.join(self.args.log_path, "ckpt.pth"))
@@ -190,11 +199,18 @@ class Diffusion(object):
             step = states[3]
             if self.config.model.ema:
                 ema.load_state_dict(states[4])
-                
-        t_index = 0 
-        
-        seq = self.seq[1:]
-        seq_next = self.seq[:-1]
+        elif hasattr(self.config.training, "layer"):
+            states = torch.load(os.path.join("/home/bingwenzhang/ddim/exp/logs/2024-02-24-15-21-43/ckpt.pth"), map_location="cpu")
+            def check(k):
+                for i in seq:
+                    if f".models.{i}." in k:
+                        return False
+                return True
+            
+            state = {k: v for k, v in states[-1].items() if check(k)}
+            ema = ema.cpu()
+            ema.load_state_dict(state, strict=False)
+            ema = ema.to(self.device)
 
         for epoch in range(start_epoch, self.config.training.n_epochs):
             
@@ -264,8 +280,8 @@ class Diffusion(object):
                 if step % self.config.training.sample_freq == 0:
                     path = os.path.join(self.args.log_path, '%d.png' % step)
                     self.sample_image(ema.module, path)
-                    path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
-                    self.sample_image(model, path2)
+                    # path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
+                    # self.sample_image(model, path2)
 
                 if step % self.config.training.snapshot_freq == 0:
                     states = [

@@ -47,7 +47,7 @@ def end2end_loss(
 ):
     a = (1-b).cumprod(dim=0)[t].view(-1, 1, 1, 1)
     x = x0 * a.sqrt() + e * (1.0 - a).sqrt()
-    output = model.sample(x)
+    output = model.forward(x)
     if keepdim:
         return (x0 - output).square().sum(dim=(1, 2, 3))
     else:

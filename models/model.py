@@ -402,9 +402,12 @@ class Model(nn.Module):
         self.betas = betas
     
     
-    def forward(self, x, t, last_t=None):
-        et = self.models[str(t)](x, t, last_t)
-        return et
+    def forward(self, x, t=None, last_t=None):
+        if t is None:
+            return self.sample(x)
+        else:
+            et = self.models[str(t)](x, t, last_t)
+            return et
 
     def __getitem__(self, i):
         return self.models[str(i)]
@@ -461,9 +464,11 @@ class Model(nn.Module):
     Model(EMA): IS: 9.316(0.094), FID:  5.644
     5200
     Model(EMA): IS: 9.185(0.078), FID:  5.404
+    6600
+    Model(EMA): IS: 9.237(0.095), FID:  5.328 
     (ddim)
     frechet_inception_distance: 5.605276
-    frechet_inception_distance: 5.605047 (不算最后一步)
+    frechet_inception_distance: 3.981065 (不算最后一步)
 250(use_time_embed)
     1300
     Model(EMA): IS: 8.572(0.097), FID:  8.769
@@ -472,7 +477,9 @@ class Model(nn.Module):
     3000 
     Model(EMA): IS: 8.909(0.089), FID:  6.321 
     4100
-    Model(EMA): IS: 8.966(0.112), FID:  5.896 
+    Model(EMA): IS: 8.966(0.112), FID:  5.896
+    4800
+
 20:
 loss v2:
     1000
@@ -518,4 +525,12 @@ best:
     Model(EMA): IS: 8.768(0.107), FID: 10.879 (336919884)
     x3:
     Model(EMA): IS: 8.627(0.083), FID: 12.033 (364173740)
-"""
+
+first_layer 
+32:
+    Model(EMA): IS: 8.563(0.091), FID: 12.578 
+48:
+    Model(EMA): IS: 8.698(0.100), FID: 11.599
+64:
+    
+    """

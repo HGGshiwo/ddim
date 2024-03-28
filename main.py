@@ -12,8 +12,7 @@ import datetime
 from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
-import os  
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"  
+
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
@@ -74,7 +73,15 @@ def parse_args_and_config():
         action="store_true",
         help="use model to test fid",
     )
+    parser.add_argument(
+        "--gpu",
+        default="0",
+        type=str,
+        help="gpu id for testing",
+    )
     args = parser.parse_args()
+    
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu  
     
     if args.doc is None:
         args.doc = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
