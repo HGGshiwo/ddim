@@ -133,7 +133,7 @@ class Diffusion(object):
         else:
             if self.config.use_pretrained:
                 ckpt_path = os.path.join("exp", f"model-790000.ckpt")
-            if hasattr(self.config.training, "use_ckpt"):
+            elif hasattr(self.config.training, "use_ckpt"):
                 ckpt_path = self.config.training.use_ckpt
             else:
                 ckpt_path = os.path.join(self.args.log_path, "ckpt.pth")
