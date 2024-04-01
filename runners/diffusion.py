@@ -133,6 +133,8 @@ class Diffusion(object):
         else:
             if self.config.use_pretrained:
                 ckpt_path = os.path.join("exp", f"model-790000.ckpt")
+            if hasattr(self.config.training, "use_ckpt"):
+                ckpt_path = self.config.training.use_ckpt
             else:
                 ckpt_path = os.path.join(self.args.log_path, "ckpt.pth")
             states = torch.load(ckpt_path, map_location=self.config.device)
@@ -148,14 +150,15 @@ class Diffusion(object):
         else:
             model_class = UNet if self.config.model.use_time_embed else Model
             model = model_class(self.config, self.betas, self.seq)
-            if not self.args.train:
+            load_ckpt = (not self.args.train) or (hasattr(self.config.training, "use_ckpt") and not self.args.resume_training)
+            if load_ckpt:
                 states = self.get_states()
                 model.load_state_dict(states[0], strict=True)
             
             model = model.to(self.device)
             if self.config.model.ema:
                 ema = ModelEma(model, decay=self.config.model.ema_rate)
-                if not self.args.train:
+                if load_ckpt:
                     ema.load_state_dict(states[-1])
             else:
                 ema = None

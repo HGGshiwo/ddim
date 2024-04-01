@@ -11,21 +11,20 @@ data:
     num_workers: 4
 
 model:
-    use_time_embed: False
+    use_time_embed: false
     type: "simple"
     block_type: "UnetBlock"
     in_channels: 3
     out_ch: 3
     ch_num: 
-    - value: 32
-      num: 50
-    - value: 16
-      num: 50
-    ch_mult: 
-    - value: [1, 2, 2, 2]
-      num: 50
-    - value: [1, 2]
-      num: 50
+        - value: 128
+          num: 1
+        - value: 128
+          num: 1
+        - value: 128
+          num: 18
+
+    ch_mult: [1, 2, 2, 2]
     num_res_blocks: 2
     attn_resolutions: [16, ]
     dropout: 0.1
@@ -42,7 +41,7 @@ diffusion:
     beta_start: 0.0001
     beta_end: 0.02
     num_diffusion_timesteps: 1000
-    num_block: 100
+    num_block: 20
     learn_alpha: false
 
 
@@ -52,8 +51,8 @@ training:
     n_iters: 5000000
     snapshot_freq: 5000
     sample_freq: 5000
-    train_type: end2end
-    use_ckpt: /home/bingwenzhang/ddim/exp/logs/2024-03-26-22-31-35/ckpt.pth
+    train_type: layer
+    layer: [1]
 
 sampling:
     batch_size: 256

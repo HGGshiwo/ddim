@@ -526,11 +526,24 @@ best:
     x3:
     Model(EMA): IS: 8.627(0.083), FID: 12.033 (364173740)
 
-first_layer 
-32:
+first_layer32:
+    1100?
     Model(EMA): IS: 8.563(0.091), FID: 12.578 
-48:
+    2000
+    Model(EMA): IS: 8.566(0.085), FID: 12.447
+first_layer48:
+    1100?
     Model(EMA): IS: 8.698(0.100), FID: 11.599
-64:
+    1900
+    Model(EMA): IS: 8.695(0.092), FID: 11.578
+first_layer64:
+    4000
+    Model(EMA): IS: 8.774(0.105), FID: 11.410
+first_layer72:
+    3700
+    Model(EMA): IS: 8.735(0.122), FID: 11.321 
     
+layer_100
+    6800
+    Model(EMA): IS: 6.923(0.060), FID: 33.512
     """
