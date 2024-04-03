@@ -305,7 +305,7 @@ class Diffusion(object):
         if not self.args.model:
             model = ema.module
         model.eval()
-        self.sample_image(model, os.path.join(self.args.image_folder, f"sample.png"))
+        self.sample_image2(model, os.path.join(self.args.image_folder, f"sample.png"))
 
     def sample_image(self, model, path):
         
@@ -327,7 +327,45 @@ class Diffusion(object):
             
         x = inverse_data_transform(config, x)
         save_image(x, path, nrow=16)
+
+    def sample2(self):
+        args, config = self.args, self.config
+        dataset, test_dataset = get_dataset(args, config)
+        train_loader = data.DataLoader(
+            dataset,
+            batch_size=256,
+            shuffle=True,
+            num_workers=config.data.num_workers,
+        )
+        
+        model, ema = self.create_model()
+        t_idx = len(self.seq) // 2
+        t, t_next = self.seq[t_idx], self.seq[t_idx - 1]
+        with torch.no_grad():
+            a = (1-self.betas).cumprod(dim=0)[t].view(-1, 1, 1, 1)
+            x0, _ = next(iter(train_loader))
+            x0 = x0.to(self.device)
+            x0 = data_transform(self.config, x0)
+
+            e = torch.randn_like(x0)
+            x = x0 * a.sqrt() + e * (1.0 - a).sqrt()
+            # e_pred = model[t](x, t, t_next)
+            # x0_pred = (x - e_pred * (1.0 - a).sqrt()) / a.sqrt()
+            # print(((1.0 - a).sqrt()).item())
+            # print((e_pred - e).square().sum(dim=(1,2,3)).mean(dim=0).item())
             
+            for i, j in zip(reversed(self.seq[1:t_idx]), reversed(self.seq[:-1-t_idx])):        
+                x = model.models[str(i)].sample(x, i, j)                
+            x0_pred = x
+            # x0_pred = model.sample(x) # 噪声的影响超过了图片的影响
+            print((x0_pred - x0).square().sum(dim=(1,2,3)).mean(dim=0).item())
+            x0_pred = inverse_data_transform(config, x0_pred)
+            x0 = inverse_data_transform(config, x0)
+            x = inverse_data_transform(config, x)
+            save_image(x0_pred, os.path.join(self.args.image_folder, f"x0_pred.png"), nrow=16)
+            save_image(x0, os.path.join(self.args.image_folder, f"x0.png"), nrow=16)
+            # save_image(x, os.path.join(self.args.image_folder, f"x.png"), nrow=16)
+
     def fid(self):
         model, ema = self.create_model()
         if not self.args.model:
@@ -404,7 +442,7 @@ class Diffusion(object):
         for i, (x, y) in enumerate(train_loader):
             if t_index >= len(seq):
                 break
-            t = seq[t_index] * torch.ones(x.size(0), device=self.device, dtype=torch.long)
+            t = seq[t_index]
             x = x.to(self.device)
             x = data_transform(self.config, x)
             x_T = torch.randn_like(x)

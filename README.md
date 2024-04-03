@@ -1,3 +1,21 @@
+## 为什么diffusion的第一步计算的x0不能作为结果?
+  
+假设：diffusion是一个去噪器+生成器。每一个unet是一个去噪器，如果输入的是$ax_0 + b\varepsilon$，那么输出的$x_0$是非常好的。但是如果输入的是一个随机噪声，那么输出的x0不一定很好，需要多个unet进行不同步的拟合。
+
+现在end2end无法实现去噪的原因是：
+
+1. 参数量太大了，不好训练。
+2. Unet训练的时候是用噪声进行监督，end2end是用x0进行监督
+3. 中间使用了ddim的采样
+
+设计实验：
+
+1. 输入加噪图片，用Unet最后一层输出的x0应该是好的
+2. 减小参数量到30M，应该可以训练出去噪器
+
+## 为什么原始的diffusion，输入加噪图片，输出的却不是原来的图片?
+说明不能用训练去噪器的方式训练生成器？？
+
 # Denoising Diffusion Implicit Models (DDIM)
 
 [Jiaming Song](http://tsong.me), [Chenlin Meng](http://cs.stanford.edu/~chenlin) and [Stefano Ermon](http://cs.stanford.edu/~ermon), Stanford

@@ -183,7 +183,7 @@ def main():
     try:
         runner = Diffusion(args, config)
         if args.sample:
-            runner.sample()
+            runner.sample2()
         elif args.loss:
             runner.loss()
         elif args.fid:
