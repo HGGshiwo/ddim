@@ -546,4 +546,6 @@ first_layer72:
 layer_100
     6800
     Model(EMA): IS: 6.923(0.060), FID: 33.512
+    10000
+    Model(EMA): IS: 7.631(0.105), FID: 21.299  
     """

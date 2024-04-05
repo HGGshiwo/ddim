@@ -25,9 +25,7 @@ model:
     - value: [1, 2, 2, 2]
       num: 50
     - value: [1, 2]
-      num: 49
-    - value: [1]
-      num: 1
+      num: 50
     num_res_blocks: 2
     attn_resolutions: [16, ]
     dropout: 0.1
@@ -55,7 +53,7 @@ training:
     snapshot_freq: 5000
     sample_freq: 5000
     train_type: layer
-    layer: [99]
+    layer: [99, 98, 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84, 83, 82, 81, 80]
     use_ckpt: /home/bingwenzhang/ddim/exp/logs/2024-03-26-22-31-35/ckpt.pth
 
 sampling:

@@ -150,15 +150,14 @@ class Diffusion(object):
         else:
             model_class = UNet if self.config.model.use_time_embed else Model
             model = model_class(self.config, self.betas, self.seq)
-            load_ckpt = (not self.args.train) or (hasattr(self.config.training, "use_ckpt") and not self.args.resume_training)
-            if load_ckpt:
+            if not self.args.train:
                 states = self.get_states()
                 model.load_state_dict(states[0], strict=True)
             
             model = model.to(self.device)
             if self.config.model.ema:
                 ema = ModelEma(model, decay=self.config.model.ema_rate)
-                if load_ckpt:
+                if not self.args.train:
                     ema.load_state_dict(states[-1])
             else:
                 ema = None
@@ -203,7 +202,7 @@ class Diffusion(object):
             if self.config.model.ema:
                 ema.load_state_dict(states[4])
         elif hasattr(self.config.training, "layer"):
-            states = torch.load(os.path.join("/home/bingwenzhang/ddim/exp/logs/2024-02-24-15-21-43/ckpt.pth"), map_location="cpu")
+            states = torch.load(self.config.training.use_ckpt, map_location="cpu")
             def check(k):
                 for i in seq:
                     if f".models.{i}." in k:
@@ -251,7 +250,7 @@ class Diffusion(object):
                         f"epoch: {epoch} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
                     )
                 else:
-                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
+                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step//config.diffusion.num_block)
                     logging.info(
                         f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
                     )
