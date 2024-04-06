@@ -181,7 +181,6 @@ class Diffusion(object):
         model, ema = self.create_model()
         optimizer = get_optimizer(self.config, model.parameters())
     
-        t_index = 0 
         seq = self.seq[1:]
         seq_next = self.seq[:-1]
 
@@ -222,43 +221,43 @@ class Diffusion(object):
             data_time = 0
             
             for i, (x, y) in enumerate(train_loader):                
+                
                 data_time += time.time() - data_start
                 
-                t_index = t_index % len(seq)
-                
-                t = seq[t_index]
-                t_next = seq_next[t_index]
-                
-                step += 1
-
                 x = x.to(self.device)
                 x = data_transform(self.config, x)
                 x_T = torch.randn_like(x)
                 
-                if self.config.training.train_type == "end2end":
-                    loss = end2end_loss(model, x, seq[-1], x_T, self.betas)                
-                elif self.config.training.train_type == "layer_v2":
-                    loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
-                elif self.config.training.train_type == "layer":
-                    loss = layer_loss(model, x, t, x_T, self.betas)
-                else:
-                    raise ValueError(f"{self.config.training.train_type}")
+                losses = []
+                for t, t_next in zip(seq, seq_next):          
+                    if self.config.training.train_type == "end2end":
+                        loss = end2end_loss(model, x, seq[-1], x_T, self.betas)                
+                    elif self.config.training.train_type == "layer_v2":
+                        loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
+                    elif self.config.training.train_type == "layer":
+                        loss = layer_loss(model, x, t, x_T, self.betas)
+                    else:
+                        raise ValueError(f"{self.config.training.train_type}")
+                    
+                    losses.append(loss)
+                    if self.config.training.train_type == "end2end":
+                        tb_logger.add_scalar(f"loss", loss, global_step=step)
+                        logging.info(
+                            f"epoch: {epoch} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                        )
+                    else:
+                        tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
+                        logging.info(
+                            f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                        )
+                    if self.config.training.train_type == "end2end":
+                        break
                 
-                if self.config.training.train_type == "end2end":
-                    tb_logger.add_scalar(f"loss", loss, global_step=step)
-                    logging.info(
-                        f"epoch: {epoch} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
-                    )
-                else:
-                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step//config.diffusion.num_block)
-                    logging.info(
-                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
-                    )
-
-                t_index += 1
-
+                step += 1
+                            
                 optimizer.zero_grad()
-                loss.backward()
+                for loss in losses:
+                    loss.backward()
 
                 use_whole_model = self.config.training.train_type == "end2end" or self.config.model.use_time_embed
 
@@ -267,18 +266,20 @@ class Diffusion(object):
                         model.parameters(), config.optim.grad_clip
                     )
                 else:
-                    torch.nn.utils.clip_grad_norm_(
-                        model[t].parameters(), config.optim.grad_clip
-                    )
-     
+                    for t in seq:
+                        torch.nn.utils.clip_grad_norm_(
+                            model[t].parameters(), config.optim.grad_clip
+                        )
+        
                 optimizer.step()
 
                 if self.config.model.ema:
                     if use_whole_model:
                         ema.update(model)
                     else:
-                        ema.update(model, t)
-                
+                        for t in seq:
+                            ema.update(model, t)
+                    
                 if step % self.config.training.sample_freq == 0:
                     path = os.path.join(self.args.log_path, '%d.png' % step)
                     self.sample_image(ema.module, path)
