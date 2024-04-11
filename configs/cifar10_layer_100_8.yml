@@ -8,7 +8,7 @@ data:
     gaussian_dequantization: false
     random_flip: true
     rescaled: true
-    num_workers: 4
+    num_workers: 16
 
 model:
     use_time_embed: False
@@ -17,16 +17,15 @@ model:
     in_channels: 3
     out_ch: 3
     ch_num: 
-      - value: 32
-        num: 50
-      - value: 16
-        num: 50
-    ch_mult:
-      - value: [1, 2, 2, 2]
-        num: 50
-      - value: [1, 2]
-        num: 50
-
+    - value: 32
+      num: 50
+    - value: 16
+      num: 50
+    ch_mult: 
+    - value: [1, 2, 2, 2]
+      num: 50
+    - value: [1, 2]
+      num: 50
     num_res_blocks: 2
     attn_resolutions: [16, ]
     dropout: 0.1
@@ -49,27 +48,16 @@ diffusion:
 
 training:
     batch_size: 64
-    n_epochs: 10000
+    n_epochs: 20000
     n_iters: 5000000
     snapshot_freq: 5000
     sample_freq: 5000
     train_type: layer
+    layer: [17, 18, 19, 20, 21]
+    use_ckpt: /home/bingwenzhang/ddim/exp/logs/2024-03-26-22-31-35/ckpt.pth
 
 sampling:
     batch_size: 256
-    ckpt: 
-      - value: "2024-03-26-22-31-35"
-        num: 1
-      - value: "2024-04-07-10-11-53" # 2-6
-        num: 5
-      - value: "2024-04-07-10-21-26" # 7-11
-        num: 5
-      - value: "2024-04-08-15-00-42" # 12-16
-        num: 5
-      - value: "2024-03-26-22-31-35"
-        num: 79
-      - value: "2024-04-04-17-17-16" # 95-99
-        num: 5
 
 eval:
     num_images: 50000
