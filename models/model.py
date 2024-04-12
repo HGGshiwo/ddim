@@ -466,9 +466,11 @@ class Model(nn.Module):
     Model(EMA): IS: 9.185(0.078), FID:  5.404
     6600
     Model(EMA): IS: 9.237(0.095), FID:  5.328 
-    (ddim)
+    
+ddim pre_train
     frechet_inception_distance: 5.605276
     frechet_inception_distance: 3.981065 (不算最后一步)
+
 250(use_time_embed)
     1300
     Model(EMA): IS: 8.572(0.097), FID:  8.769
@@ -563,12 +565,21 @@ layer_100
     Model(EMA): IS: 7.686(0.104), FID: 20.672
     10900(7-11)
     Model(EMA): IS: 7.690(0.103), FID: 20.647
+    11500(7-11)
+    Model(EMA): IS: 7.692(0.105), FID: 20.674
 
     10600(12-16)
     Model(EMA): IS: 7.667(0.103), FID: 20.923
+    11300(12-16)
+    Model(EMA): IS: 7.660(0.098), FID: 20.981
+
+    10660(17-21)
+    Model(EMA): IS: 7.661(0.102), FID: 21.054
 
     best
     Model(EMA): IS: 7.737(0.096), FID: 19.686
     Model(EMA): IS: 7.802(0.102), FID: 19.195
     Model(EMA): IS: 7.801(0.104), FID: 19.233
+    Model(EMA): IS: 7.830(0.106), FID: 18.949
+    Model(EMA): IS: 7.836(0.106), FID: 18.988
     """
