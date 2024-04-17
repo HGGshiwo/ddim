@@ -151,12 +151,18 @@ class AttnBlock(nn.Module):
                                         stride=1,
                                         padding=0)
 
-    def forward(self, x):
+    def forward(self, x, kv=None):
         h_ = x
         h_ = self.norm(h_)
+        if kv is not None:
+            h_, true_x = h_.chunk(2)
         q = self.q(h_)
-        k = self.k(h_)
-        v = self.v(h_)
+        if kv is None:
+            k = self.k(h_)
+            v = self.v(h_)
+        else:
+            k = self.k(true_x)
+            v = self.v(true_x)
 
         # compute attention
         b, c, h, w = q.shape
@@ -176,6 +182,9 @@ class AttnBlock(nn.Module):
 
         h_ = self.proj_out(h_)
 
+        if kv is not None:
+            h_ = torch.cat([h_, true_x], dim=0)
+        
         return x+h_
 
 
@@ -274,16 +283,17 @@ class _UnetBlock(nn.Module):
                                         stride=1,
                                         padding=1)
 
-    def forward(self, x):
+    def forward(self, x, true_x=None):
         assert x.shape[2] == x.shape[3] == self.resolution
-
+        if true_x is not None:
+            x = torch.cat([x, true_x], dim=0)
         # downsampling
         hs = [self.conv_in(x)]
         for i_level in range(self.num_resolutions):
             for i_block in range(self.num_res_blocks):
                 h = self.down[i_level].block[i_block](hs[-1])
                 if len(self.down[i_level].attn) > 0:
-                    h = self.down[i_level].attn[i_block](h)
+                    h = self.down[i_level].attn[i_block](h, true_x)
                 hs.append(h)
             if i_level != self.num_resolutions-1:
                 hs.append(self.down[i_level].downsample(hs[-1]))
@@ -291,7 +301,7 @@ class _UnetBlock(nn.Module):
         # middle
         h = hs[-1]
         h = self.mid.block_1(h)
-        h = self.mid.attn_1(h)
+        h = self.mid.attn_1(h, true_x)
         h = self.mid.block_2(h)
 
         # upsampling
@@ -300,7 +310,7 @@ class _UnetBlock(nn.Module):
                 h = self.up[i_level].block[i_block](
                     torch.cat([h, hs.pop()], dim=1))
                 if len(self.up[i_level].attn) > 0:
-                    h = self.up[i_level].attn[i_block](h)
+                    h = self.up[i_level].attn[i_block](h, true_x)
             if i_level != 0:
                 h = self.up[i_level].upsample(h)
 
@@ -308,6 +318,8 @@ class _UnetBlock(nn.Module):
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
+        if true_x is not None:
+            return h[:h.size(0)//2]
         return h
 
 
@@ -325,23 +337,23 @@ class UnetBlock(_UnetBlock):
         if  self.out_ch != 3:
             self.pixel_shuffle = nn.PixelShuffle(2)
         
-    def forward_with_shuffle(self, x):
+    def forward_with_shuffle(self, x, true_x=None):
         if self.in_ch != 3:
             x = self.pixel_unshuffle(x)
-        et = super().forward(x)
+        et = super().forward(x, true_x)
         if self.out_ch != 3:
             et = self.pixel_shuffle(et)
         return et
 
-    def forward(self, x, t, last_t=None):
-        et = self.forward_with_shuffle(x)
+    def forward(self, x, t, last_t=None, true_x=None):
+        et = self.forward_with_shuffle(x, true_x)
         if self.pred_mean:
             # layer t 是输入t, 输出t-1
             et = self.sample_block(et, x, t, last_t)
         return et
     
-    def sample(self, x, i, j):
-        et = self.forward_with_shuffle(x)
+    def sample(self, x, i, j, true_x=None):
+        et = self.forward_with_shuffle(x, true_x)
         x = self.sample_block(et, x, i, j)
         return x
 
@@ -403,11 +415,8 @@ class Model(nn.Module):
     
     
     def forward(self, x, t=None, last_t=None):
-        if t is None:
-            return self.sample(x)
-        else:
-            et = self.models[str(t)](x, t, last_t)
-            return et
+        et = self.models[str(t)](x, t, last_t)
+        return et
 
     def __getitem__(self, i):
         return self.models[str(i)]
