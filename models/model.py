@@ -572,9 +572,13 @@ layer_100
     Model(EMA): IS: 7.667(0.103), FID: 20.923
     11300(12-16)
     Model(EMA): IS: 7.660(0.098), FID: 20.981
+    12300(12-16)
+    Model(EMA): IS: 7.651(0.098), FID: 21.016
 
     10660(17-21)
     Model(EMA): IS: 7.661(0.102), FID: 21.054
+    11750(17-21)
+    Model(EMA): IS: 7.653(0.099), FID: 21.136
 
     best
     Model(EMA): IS: 7.737(0.096), FID: 19.686
@@ -582,4 +586,8 @@ layer_100
     Model(EMA): IS: 7.801(0.104), FID: 19.233
     Model(EMA): IS: 7.830(0.106), FID: 18.949
     Model(EMA): IS: 7.836(0.106), FID: 18.988
+    Model(EMA): IS: 7.835(0.104), FID: 19.047
+    Model(EMA): IS: 7.827(0.103), FID: 19.085
+    Model(EMA): IS: 7.859(0.099), FID: 18.789
+    Model(EMA): IS: 7.862(0.095), FID: 18.837
     """
