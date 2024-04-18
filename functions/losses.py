@@ -48,24 +48,23 @@ def end2end_loss(
 ):
     true_xs = [x0]
     true_x = x0
+
     for i, j in zip(model.seq[1:], model.seq[:-1]):
         at = (1-b).cumprod(dim=0)[i].view(-1, 1, 1, 1)
         at_1 = (1-b).cumprod(dim=0)[j].view(-1, 1, 1, 1)
         true_x = (at/at_1).sqrt() * true_x + (1 - at/at_1).sqrt() * torch.randn_like(true_x)
         true_xs.append(true_x)
-
+    
     x = true_xs[-1]
     loss = 0
     for i, j, true_x, next_true_x in zip(reversed(model.seq[1:]), reversed(model.seq[:-1]), reversed(true_xs[1:]), reversed(true_xs[:-1])):      
         x = model[str(i)].sample(x, i, j) 
-        save_image((x[:16]+1)/2, f"{i}.png")
-        save_image((true_x[:16]+1)/2, f"{i}_true.png")
+        # save_image((x[:16]+1)/2, f"{i}.png")
+        # save_image((next_true_x[:16]+1)/2, f"{i}_true.png")
+        # print(f"Layer {i} loss: {(x - next_true_x).square().sum((1,2,3)).mean(dim=0)}")
         loss += (x - next_true_x).square()
-    exit()
+
     if keepdim:
         return loss.sum(dim=(1, 2, 3))
     else:
         return loss.sum(dim=(1, 2, 3)).mean(dim=0)
-
-
-

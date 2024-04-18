@@ -47,11 +47,11 @@ diffusion:
 
 
 training:
-    batch_size: 8
+    batch_size: 16
     n_epochs: 20000
     n_iters: 5000000
     snapshot_freq: 5000
-    sample_freq: 100
+    sample_freq: 500
     train_type: end2end
     # use_ckpt: /home/bingwenzhang/ddim/exp/logs/2024-03-26-22-31-35/ckpt.pth
 

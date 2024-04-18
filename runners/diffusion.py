@@ -225,11 +225,27 @@ class Diffusion(object):
                 x = x.to(self.device)
                 x = data_transform(self.config, x)
                 x_T = torch.randn_like(x)
-                
+
+                if self.config.training.train_type == "end2end":
+                    true_xs = [x]
+                    true_x = x
+                    for i, j in zip(self.seq[1:], self.seq[:-1]):
+                        at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+                        at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
+                        true_x = (at/at_1).sqrt() * true_x + (1 - at/at_1).sqrt() * torch.randn_like(true_x)
+                        true_xs.append(true_x)
+                    x = true_xs[-1]
+                    true_x_seq =  list(reversed(true_xs[1:]))
+                    true_x_seq_next = list(reversed(true_xs[:-1]))
+                    loss = 0
+
                 losses = []
-                for t, t_next in zip(seq, seq_next):          
+                for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
+
                     if self.config.training.train_type == "end2end":
-                        loss = end2end_loss(model, x, seq[-1], x_T, self.betas)                
+                        x = model[str(t)].sample(x, t, t_next) 
+                        loss = (x - true_x_seq_next[k]).square().sum((1,2,3)).mean(dim=0)
+                                     
                     elif self.config.training.train_type == "layer_v2":
                         loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
                     elif self.config.training.train_type == "layer":
@@ -238,24 +254,21 @@ class Diffusion(object):
                         raise ValueError(f"{self.config.training.train_type}")
                     
                     losses.append(loss)
-                    if self.config.training.train_type == "end2end":
-                        tb_logger.add_scalar(f"loss", loss, global_step=step)
-                        logging.info(
-                            f"epoch: {epoch} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
-                        )
-                    else:
-                        tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
-                        logging.info(
-                            f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
-                        )
-                    if self.config.training.train_type == "end2end":
-                        break
+ 
+                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
+                    logging.info(
+                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                    )
                 
                 step += 1
                             
                 optimizer.zero_grad()
-                for loss in losses:
-                    loss.backward()
+                if self.config.training.train_type == "end2end":
+                    loss_sum = torch.stack(losses).sum()
+                    loss_sum.backward()
+                else:
+                    for loss in losses:
+                        loss.backward()
 
                 use_whole_model = self.config.training.train_type == "end2end" or self.config.model.use_time_embed
 
