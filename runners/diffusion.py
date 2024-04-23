@@ -223,7 +223,7 @@ class Diffusion(object):
             data_start = time.time()
             data_time = 0
             
-            for i, (x, y) in enumerate(train_loader):                
+            for epoch_step, (x, y) in enumerate(train_loader):                
                 
                 data_time += time.time() - data_start
                 
@@ -232,7 +232,7 @@ class Diffusion(object):
                 x_T = torch.randn_like(x)
 
                 if self.config.training.train_type == "end2end":
-                    if not self.config.training.true_x_reverse:
+                    if self.config.training.ground_truth == 'A':
                         true_xs = [x]
                         true_x = x
                         for i, j in zip(self.seq[1:], self.seq[:-1]):
@@ -243,7 +243,16 @@ class Diffusion(object):
                         x = true_xs[-1]
                         true_x_seq =  list(reversed(true_xs[1:]))
                         true_x_seq_next = list(reversed(true_xs[:-1]))
-                    else:
+                    elif self.config.training.ground_truth == 'B':
+                        true_xs = []
+                        for i in self.seq:
+                            at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+                            true_x = at.sqrt() * x + (1 - at).sqrt() * torch.randn_like(x)
+                            true_xs.append(true_x)
+                        x = true_xs[-1]
+                        true_x_seq =  list(reversed(true_xs[1:]))
+                        true_x_seq_next = list(reversed(true_xs[:-1]))
+                    elif self.config.training.ground_truth == 'D':
                         at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
                         true_x = at.sqrt() * x + (1-at).sqrt() * torch.randn_like(x)
                         true_xs = [true_x]
@@ -255,7 +264,9 @@ class Diffusion(object):
                             
                         x = true_xs[0]
                         true_x_seq = true_xs[:-1]
-                        true_x_seq_next = true_xs[1:]                        
+                        true_x_seq_next = true_xs[1:]  
+                    else:
+                        raise ValueError(f"{self.config.training.ground_truth}")                      
                 losses = []
                 for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
 
@@ -284,8 +295,9 @@ class Diffusion(object):
                     losses.append(loss)
  
                     tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
+                    
                     logging.info(
-                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (i+1)}"
+                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (epoch_step+1)}"
                     )
                 
                 step += 1
