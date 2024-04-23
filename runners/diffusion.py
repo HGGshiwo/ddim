@@ -101,7 +101,12 @@ class Diffusion(object):
 
         skip = self.num_timesteps // self.config.diffusion.num_block
         self.seq = range(0, self.num_timesteps, skip)
-        
+        if self.config.training.train_type == "end2end":
+            t = np.array(list(reversed(self.seq[1:])))
+            self.loss_weight = 3.18e-06*np.exp(0.71*(t/50+1.75))+ 0.010
+            # self.loss_weight = torch.zeros(len(self.seq[1:]))
+            # self.loss_weight[-1] = 1
+
     def get_states(self):
         if hasattr(self.config.sampling, "ckpt"):
             if os.path.exists(os.path.join(self.args.log_path, "ckpt.pth")):
@@ -227,23 +232,46 @@ class Diffusion(object):
                 x_T = torch.randn_like(x)
 
                 if self.config.training.train_type == "end2end":
-                    true_xs = [x]
-                    true_x = x
-                    for i, j in zip(self.seq[1:], self.seq[:-1]):
-                        at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
-                        at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
-                        true_x = (at/at_1).sqrt() * true_x + (1 - at/at_1).sqrt() * torch.randn_like(true_x)
-                        true_xs.append(true_x)
-                    x = true_xs[-1]
-                    true_x_seq =  list(reversed(true_xs[1:]))
-                    true_x_seq_next = list(reversed(true_xs[:-1]))
-                    loss = 0
-
+                    if not self.config.training.true_x_reverse:
+                        true_xs = [x]
+                        true_x = x
+                        for i, j in zip(self.seq[1:], self.seq[:-1]):
+                            at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+                            at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
+                            true_x = (at/at_1).sqrt() * true_x + (1 - at/at_1).sqrt() * torch.randn_like(true_x)
+                            true_xs.append(true_x)
+                        x = true_xs[-1]
+                        true_x_seq =  list(reversed(true_xs[1:]))
+                        true_x_seq_next = list(reversed(true_xs[:-1]))
+                    else:
+                        at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
+                        true_x = at.sqrt() * x + (1-at).sqrt() * torch.randn_like(x)
+                        true_xs = [true_x]
+                        for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
+                            at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+                            at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
+                            true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
+                            true_xs.append(true_x)
+                            
+                        x = true_xs[0]
+                        true_x_seq = true_xs[:-1]
+                        true_x_seq_next = true_xs[1:]                        
                 losses = []
                 for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
 
                     if self.config.training.train_type == "end2end":
-                        x = model[str(t)].sample(x, t, t_next) 
+                        if self.config.training.use_true_x_as_x:
+                            h  = true_x_seq[k]
+                        elif self.config.training.detach:
+                            h = x.detach()
+                        else:
+                            h = x
+                            
+                        if self.config.training.use_true_x:
+                            x = model[str(t)].sample(h, t, t_next, true_x_seq[k]) 
+                        else:
+                            x = model[str(t)].sample(h, t, t_next)
+                            
                         loss = (x - true_x_seq_next[k]).square().sum((1,2,3)).mean(dim=0)
                                      
                     elif self.config.training.train_type == "layer_v2":
@@ -264,8 +292,14 @@ class Diffusion(object):
                             
                 optimizer.zero_grad()
                 if self.config.training.train_type == "end2end":
-                    loss_sum = torch.stack(losses).sum()
+                    losses = [weight*loss for weight, loss in zip(reversed(self.loss_weight), losses)]
+                    loss_sum = torch.stack(losses)               
+                    loss_sum = loss_sum.sum()
                     loss_sum.backward()
+                    # for name, param in model.models[str(self.seq[1])].named_parameters():
+                    #     if param.grad is not None:
+                    #         print(name, param.grad.mean())
+                    
                 else:
                     for loss in losses:
                         loss.backward()
@@ -292,10 +326,10 @@ class Diffusion(object):
                             ema.update(model, t)
                     
                 if step % self.config.training.sample_freq == 0:
-                    path = os.path.join(self.args.log_path, '%d.png' % step)
-                    self.sample_image(ema.module, path)
-                    # path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
-                    # self.sample_image(model, path2)
+                    # path = os.path.join(self.args.log_path, '%d.png' % step)
+                    # self.sample_image(ema.module, path)
+                    path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
+                    self.sample_image(model, path2)
 
                 if step % self.config.training.snapshot_freq == 0:
                     states = [
@@ -316,7 +350,7 @@ class Diffusion(object):
         if not self.args.model:
             model = ema.module
         model.eval()
-        self.sample_image2(model, os.path.join(self.args.image_folder, f"sample.png"))
+        self.sample_image(model, os.path.join(self.args.image_folder, f"sample.png"))
 
     def sample_image(self, model, path):
         
@@ -434,7 +468,7 @@ class Diffusion(object):
                     )
                     img_id += 1
 
-    def loss(self):
+    def loss2(self):
         args, config = self.args, self.config
         dataset, test_dataset = get_dataset(args, config)
         train_loader = data.DataLoader(
@@ -460,4 +494,26 @@ class Diffusion(object):
             loss = layer_loss(model, x, t, x_T, self.betas)
             print(f"layer {t_index} loss: {loss.item()}")
             t_index += 1
-            
+
+    def loss(self):
+        args, config = self.args, self.config
+        dataset, test_dataset = get_dataset(args, config)
+        train_loader = data.DataLoader(
+            dataset,
+            batch_size=config.training.batch_size,
+            shuffle=True,
+            num_workers=config.data.num_workers,
+        )
+
+        model, ema = self.create_model()
+
+        skip = self.num_timesteps // config.diffusion.num_block
+        seq = range(0, self.num_timesteps, skip)
+        for i, (x, y) in enumerate(train_loader):
+            x = x.to(self.device)
+            x = data_transform(self.config, x)
+            for t, t_next in zip(reversed(seq[1:]), reversed(seq[:-1])):    
+                x_T = torch.randn_like(x)
+                loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
+                print(f"layer {t} loss: {loss.item()}")
+            break
