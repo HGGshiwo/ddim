@@ -353,8 +353,12 @@ class UnetBlock(_UnetBlock):
         return et
     
     def sample(self, x, i, j, true_x=None):
-        et = self.forward_with_shuffle(x, true_x)
-        x = self.sample_block(et, x, i, j)
+        # et = self.forward_with_shuffle(x, true_x)
+        et = self.forward_with_shuffle(x) # 这里小心修改了，不再使用cross_attention
+        if true_x is None:
+            x = self.sample_block(et, x, i, j)
+        else:
+            x = self.sample_block(et, true_x, i, j)
         return x
 
 
