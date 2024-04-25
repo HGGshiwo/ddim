@@ -283,7 +283,14 @@ class Diffusion(object):
                         else:
                             x = model[str(t)].sample(h, t, t_next)
                             
-                        loss = (x - true_x_seq_next[k]).square().sum((1,2,3)).mean(dim=0)
+                        loss = x - true_x_seq_next[k]
+                        at = (1-self.betas).cumprod(dim=0)[t].view(-1, 1, 1, 1)
+                        at_1 = (1-self.betas).cumprod(dim=0)[t_next].view(-1, 1, 1, 1)
+                    
+                        
+                        coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
+                        loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))
+                        loss = (loss/coeff).square().sum((1,2,3)).mean(dim=0)
                                      
                     elif self.config.training.train_type == "layer_v2":
                         loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
@@ -308,10 +315,7 @@ class Diffusion(object):
                     loss_sum = torch.stack(losses)               
                     loss_sum = loss_sum.sum()
                     loss_sum.backward()
-                    # for name, param in model.models[str(self.seq[1])].named_parameters():
-                    #     if param.grad is not None:
-                    #         print(name, param.grad.mean())
-                    
+
                 else:
                     for loss in losses:
                         loss.backward()
