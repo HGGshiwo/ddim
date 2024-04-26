@@ -49,7 +49,9 @@ training:
     use_true_x_as_x: false
     use_true_x: false
     detach: true
-    true_x_reverse: true
+    ground_truth: D
+    use_adv_loss: true
+    use_loss_weight: false
 
 sampling:
     batch_size: 256

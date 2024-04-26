@@ -273,8 +273,6 @@ class Diffusion(object):
                     if self.config.training.train_type == "end2end":
                         if self.config.training.use_true_x_as_x:
                             h  = true_x_seq[k]
-                        elif self.config.training.detach:
-                            h = x.detach()
                         else:
                             h = x
                             
@@ -291,6 +289,8 @@ class Diffusion(object):
                         
                             
                             coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
+                            if self.config.training.detach:
+                                h = h.detach()
                             loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))/coeff
                         
                         loss = loss.square().sum((1,2,3)).mean(dim=0)

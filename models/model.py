@@ -332,6 +332,8 @@ class UnetBlock(_UnetBlock):
         self.output_size = config.model.output_size
         self.in_ch = config.model.in_channels
         self.out_ch = config.model.out_ch
+        self.detach = config.training.detach
+        
         if self.in_ch != 3:
             self.pixel_unshuffle = nn.PixelUnshuffle(2)
         if  self.out_ch != 3:
@@ -356,6 +358,8 @@ class UnetBlock(_UnetBlock):
         # et = self.forward_with_shuffle(x, true_x)
         et = self.forward_with_shuffle(x) # 这里小心修改了，不再使用cross_attention
         if true_x is None:
+            if self.detach:
+                x = x.detach()
             x = self.sample_block(et, x, i, j)
         else:
             x = self.sample_block(et, true_x, i, j)
