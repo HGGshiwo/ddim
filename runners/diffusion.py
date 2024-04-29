@@ -101,11 +101,13 @@ class Diffusion(object):
 
         skip = self.num_timesteps // self.config.diffusion.num_block
         self.seq = range(0, self.num_timesteps, skip)
+        at = (1-self.betas).cumprod(dim=0)
         if self.config.training.train_type == "end2end":
             t = np.array(list(reversed(self.seq[1:])))
-            self.loss_weight = 3.18e-06*np.exp(0.71*(t/50+1.75))+ 0.010
+            # self.loss_weight = 3.18e-06*np.exp(0.71*(t/50+1.75))+ 0.010
             # self.loss_weight = torch.zeros(len(self.seq[1:]))
             # self.loss_weight[-1] = 1
+            self.loss_weight = 1/at[t].view(-1, 1, 1, 1)
 
     def get_states(self):
         if hasattr(self.config.sampling, "ckpt"):
@@ -315,7 +317,7 @@ class Diffusion(object):
                 optimizer.zero_grad()
                 if self.config.training.train_type == "end2end":
                     if config.training.use_loss_weight:
-                        losses = [weight*loss for weight, loss in zip(reversed(self.loss_weight), losses)]
+                        losses = [weight*loss for weight, loss in zip(self.loss_weight, losses)]
                     loss_sum = torch.stack(losses)               
                     loss_sum = loss_sum.sum()
                     loss_sum.backward()
@@ -534,6 +536,9 @@ class Diffusion(object):
             x = data_transform(self.config, x)
             for t, t_next in zip(reversed(seq[1:]), reversed(seq[:-1])):    
                 x_T = torch.randn_like(x)
-                loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
+                if self.config.training.train_type == "layer":
+                    loss = layer_loss(model, x, t, x_T, self.betas)
+                else:    
+                    loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
                 print(f"layer {t} loss: {loss.item()}")
             break

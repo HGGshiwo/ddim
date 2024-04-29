@@ -47,11 +47,11 @@ training:
     train_type: end2end
     # use_ckpt: /home/bingwenzhang/ddim/exp/logs/2024-03-26-22-31-35/ckpt.pth
     use_true_x_as_x: false
-    use_true_x: false
+    use_true_x: true
     detach: false
     ground_truth: D
     use_adv_loss: true
-    use_loss_weight: false
+    use_loss_weight: true
 
 sampling:
     batch_size: 256
