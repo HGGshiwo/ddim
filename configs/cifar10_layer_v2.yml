@@ -44,7 +44,7 @@ training:
     n_iters: 5000000
     snapshot_freq: 5000
     sample_freq: 5000
-    train_type: layer_v2
+    train_type: layer
     detach: false
 
 sampling:

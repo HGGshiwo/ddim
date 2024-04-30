@@ -50,7 +50,7 @@ training:
     use_true_x: true
     detach: false
     ground_truth: D
-    use_adv_loss: true
+    use_adv_loss: false
     use_loss_weight: true
 
 

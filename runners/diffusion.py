@@ -232,6 +232,7 @@ class Diffusion(object):
                 x = x.to(self.device)
                 x = data_transform(self.config, x)
                 x_T = torch.randn_like(x)
+                x0 = x
 
                 if self.config.training.train_type == "end2end":
                     if self.config.training.ground_truth == 'A':
@@ -256,7 +257,7 @@ class Diffusion(object):
                         true_x_seq_next = list(reversed(true_xs[:-1]))
                     elif self.config.training.ground_truth == 'D':
                         at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
-                        true_x = at.sqrt() * x + (1-at).sqrt() * torch.randn_like(x)
+                        true_x = at.sqrt() * x + (1-at).sqrt() * x_T
                         true_xs = [true_x]
                         for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
                             at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
@@ -293,8 +294,8 @@ class Diffusion(object):
                             coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
                             if self.config.training.detach:
                                 h = h.detach()
-                            loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))/coeff
-                        
+                            loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))
+
                         loss = loss.square().sum((1,2,3)).mean(dim=0)
                                      
                     elif self.config.training.train_type == "layer_v2":
@@ -534,11 +535,26 @@ class Diffusion(object):
         for i, (x, y) in enumerate(train_loader):
             x = x.to(self.device)
             x = data_transform(self.config, x)
-            for t, t_next in zip(reversed(seq[1:]), reversed(seq[:-1])):    
-                x_T = torch.randn_like(x)
-                if self.config.training.train_type == "layer":
-                    loss = layer_loss(model, x, t, x_T, self.betas)
-                else:    
-                    loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
-                print(f"layer {t} loss: {loss.item()}")
+            x0 = x
+            x_T = torch.randn_like(x)
+            at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
+            true_x = at.sqrt() * x + (1-at).sqrt() * x_T
+            true_xs = [true_x]
+            for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
+                at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+                at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
+                true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
+                true_xs.append(true_x)
+                
+            x = true_xs[0]
+            true_x_seq = true_xs[:-1]
+            true_x_seq_next = true_xs[1:]  
+            
+            for k, (t, t_next) in enumerate(zip(reversed(seq[1:]), reversed(seq[:-1]))):    
+                x = model[str(t)].sample(x, t, t_next)
+                out = model[str(t)].sample(true_x_seq[k], t, t_next)
+                loss1 = (out - true_x_seq_next[k]).square().sum((1,2,3)).mean(dim=0)
+                loss2 = (x - true_x_seq_next[k]).square().sum((1,2,3)).mean(dim=0)
+                print(f"layer {t} loss: {loss1.item()} loss2: {loss2.item()}")
+                
             break
