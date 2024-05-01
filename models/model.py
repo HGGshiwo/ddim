@@ -338,17 +338,9 @@ class UnetBlock(_UnetBlock):
             self.pixel_unshuffle = nn.PixelUnshuffle(2)
         if  self.out_ch != 3:
             self.pixel_shuffle = nn.PixelShuffle(2)
-        
-    def forward_with_shuffle(self, x, true_x=None):
-        if self.in_ch != 3:
-            x = self.pixel_unshuffle(x)
-        et = super().forward(x, true_x)
-        if self.out_ch != 3:
-            et = self.pixel_shuffle(et)
-        return et
 
     def forward(self, x, t, last_t=None, true_x=None):
-        et = self.forward_with_shuffle(x, true_x)
+        et = super().forward(x, true_x)
         if self.pred_mean:
             # layer t 是输入t, 输出t-1
             et = self.sample_block(et, x, t, last_t)
