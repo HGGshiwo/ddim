@@ -230,20 +230,18 @@ class Diffusion(object):
                 x = data_transform(self.config, x)
                 x_T = torch.randn_like(x)
 
-                if self.config.training.train_type == "end2end":
-                   
-                    at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
-                    true_x = at.sqrt() * x + (1-at).sqrt() * x_T
-                    true_xs = [true_x]
-                    for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
-                        at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
-                        at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
-                        true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
-                        true_xs.append(true_x)
-                        
-                    x = true_xs[0]
-                    true_x_seq = true_xs[:-1]
-                    true_x_seq_next = true_xs[1:]  
+                at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
+                true_x = at.sqrt() * x + (1-at).sqrt() * x_T
+                true_xs = [true_x]
+                for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
+                    at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+                    at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
+                    true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
+                    true_xs.append(true_x)
+                    
+                x = true_xs[0]
+                true_x_seq = true_xs[:-1]
+                true_x_seq_next = true_xs[1:]  
                                      
                 losses = []
 
@@ -252,6 +250,7 @@ class Diffusion(object):
                 else:
                     outputs = model(x)
                 
+                h = x
                 for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
                     loss = outputs[k] - true_x_seq_next[k]
                 
@@ -262,6 +261,7 @@ class Diffusion(object):
                         
                         coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
                         loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))
+                        h = outputs[k]
 
                     loss = loss.square().sum((1,2,3)).mean(dim=0)
                     
