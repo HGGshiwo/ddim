@@ -26,8 +26,7 @@ model:
     ema: True
     resamp_with_conv: True
     upsamp_type: None
-    input_size: 32
-    output_size: 32
+
 
 diffusion:
     beta_schedule: linear
@@ -37,20 +36,16 @@ diffusion:
     num_block: 20
     learn_alpha: false
 
-
 training:
-    batch_size: 16
+    batch_size: 32
     n_epochs: 20000
     n_iters: 5000000
     snapshot_freq: 500
     sample_freq: 500
     train_type: end2end
     # use_ckpt: /home/bingwenzhang/ddim/exp/logs/2024-03-26-22-31-35/ckpt.pth
-    use_true_x_as_x: false
     use_true_x: true
-    detach: false
-    ground_truth: D
-    use_adv_loss: true
+    use_adv_loss: false
     use_loss_weight: true
 
 sampling:

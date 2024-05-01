@@ -65,6 +65,62 @@ class Downsample(nn.Module):
         return x
 
 
+class AttnBlock(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.norm = Normalize(in_channels)
+        self.q = torch.nn.Conv2d(in_channels,
+                                 in_channels,
+                                 kernel_size=1,
+                                 stride=1,
+                                 padding=0)
+        self.k = torch.nn.Conv2d(in_channels,
+                                 in_channels,
+                                 kernel_size=1,
+                                 stride=1,
+                                 padding=0)
+        self.v = torch.nn.Conv2d(in_channels,
+                                 in_channels,
+                                 kernel_size=1,
+                                 stride=1,
+                                 padding=0)
+        self.proj_out = torch.nn.Conv2d(in_channels,
+                                        in_channels,
+                                        kernel_size=1,
+                                        stride=1,
+                                        padding=0)
+
+    def forward(self, x, kv=None):
+        h_ = x
+        h_ = self.norm(h_)
+        
+        q = self.q(h_)
+        k = self.k(h_)
+        v = self.v(h_)
+
+        # compute attention
+        b, c, h, w = q.shape
+        q = q.reshape(b, c, h*w)
+        q = q.permute(0, 2, 1)   # b,hw,c
+        k = k.reshape(b, c, h*w)  # b,c,hw
+        w_ = torch.bmm(q, k)     # b,hw,hw    w[b,i,j]=sum_c q[b,i,c]k[b,c,j]
+        w_ = w_ * (int(c)**(-0.5))
+        w_ = torch.nn.functional.softmax(w_, dim=2)
+
+        # attend to values
+        v = v.reshape(b, c, h*w)
+        w_ = w_.permute(0, 2, 1)   # b,hw,hw (first hw of k, second of q)
+        # b, c,hw (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j]
+        h_ = torch.bmm(v, w_)
+        h_ = h_.reshape(b, c, h, w)
+
+        h_ = self.proj_out(h_)
+        
+        return x+h_
+
+
 class ResnetBlock(nn.Module):
     def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
                  dropout):
@@ -124,70 +180,6 @@ class ResnetBlock(nn.Module):
         return x+h
 
 
-class AttnBlock(nn.Module):
-    def __init__(self, in_channels):
-        super().__init__()
-        self.in_channels = in_channels
-
-        self.norm = Normalize(in_channels)
-        self.q = torch.nn.Conv2d(in_channels,
-                                 in_channels,
-                                 kernel_size=1,
-                                 stride=1,
-                                 padding=0)
-        self.k = torch.nn.Conv2d(in_channels,
-                                 in_channels,
-                                 kernel_size=1,
-                                 stride=1,
-                                 padding=0)
-        self.v = torch.nn.Conv2d(in_channels,
-                                 in_channels,
-                                 kernel_size=1,
-                                 stride=1,
-                                 padding=0)
-        self.proj_out = torch.nn.Conv2d(in_channels,
-                                        in_channels,
-                                        kernel_size=1,
-                                        stride=1,
-                                        padding=0)
-
-    def forward(self, x, kv=None):
-        h_ = x
-        h_ = self.norm(h_)
-        if kv is not None:
-            h_, true_x = h_.chunk(2)
-        q = self.q(h_)
-        if kv is None:
-            k = self.k(h_)
-            v = self.v(h_)
-        else:
-            k = self.k(true_x)
-            v = self.v(true_x)
-
-        # compute attention
-        b, c, h, w = q.shape
-        q = q.reshape(b, c, h*w)
-        q = q.permute(0, 2, 1)   # b,hw,c
-        k = k.reshape(b, c, h*w)  # b,c,hw
-        w_ = torch.bmm(q, k)     # b,hw,hw    w[b,i,j]=sum_c q[b,i,c]k[b,c,j]
-        w_ = w_ * (int(c)**(-0.5))
-        w_ = torch.nn.functional.softmax(w_, dim=2)
-
-        # attend to values
-        v = v.reshape(b, c, h*w)
-        w_ = w_.permute(0, 2, 1)   # b,hw,hw (first hw of k, second of q)
-        # b, c,hw (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j]
-        h_ = torch.bmm(v, w_)
-        h_ = h_.reshape(b, c, h, w)
-
-        h_ = self.proj_out(h_)
-
-        if kv is not None:
-            h_ = torch.cat([h_, true_x], dim=0)
-        
-        return x+h_
-
-
 class _UnetBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -196,7 +188,7 @@ class _UnetBlock(nn.Module):
         attn_resolutions = config.model.attn_resolutions
         dropout = config.model.dropout
         in_channels = config.model.in_channels
-        resolution = config.model.input_size
+        resolution = config.data.image_size
         resamp_with_conv = config.model.resamp_with_conv
         num_timesteps = config.diffusion.num_diffusion_timesteps
         
@@ -283,17 +275,15 @@ class _UnetBlock(nn.Module):
                                         stride=1,
                                         padding=1)
 
-    def forward(self, x, true_x=None):
+    def forward(self, x):
         assert x.shape[2] == x.shape[3] == self.resolution
-        if true_x is not None:
-            x = torch.cat([x, true_x], dim=0)
         # downsampling
         hs = [self.conv_in(x)]
         for i_level in range(self.num_resolutions):
             for i_block in range(self.num_res_blocks):
                 h = self.down[i_level].block[i_block](hs[-1])
                 if len(self.down[i_level].attn) > 0:
-                    h = self.down[i_level].attn[i_block](h, true_x)
+                    h = self.down[i_level].attn[i_block](h)
                 hs.append(h)
             if i_level != self.num_resolutions-1:
                 hs.append(self.down[i_level].downsample(hs[-1]))
@@ -301,7 +291,7 @@ class _UnetBlock(nn.Module):
         # middle
         h = hs[-1]
         h = self.mid.block_1(h)
-        h = self.mid.attn_1(h, true_x)
+        h = self.mid.attn_1(h)
         h = self.mid.block_2(h)
 
         # upsampling
@@ -310,7 +300,7 @@ class _UnetBlock(nn.Module):
                 h = self.up[i_level].block[i_block](
                     torch.cat([h, hs.pop()], dim=1))
                 if len(self.up[i_level].attn) > 0:
-                    h = self.up[i_level].attn[i_block](h, true_x)
+                    h = self.up[i_level].attn[i_block](h)
             if i_level != 0:
                 h = self.up[i_level].upsample(h)
 
@@ -318,8 +308,7 @@ class _UnetBlock(nn.Module):
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
-        if true_x is not None:
-            return h[:h.size(0)//2]
+        
         return h
 
 
@@ -327,31 +316,11 @@ class UnetBlock(_UnetBlock):
     def __init__(self, config, betas) -> None:    
         super().__init__(config)
         learn_alpha = config.diffusion.learn_alpha
-        self.pred_mean = config.training.train_type == "layer_v2" 
         self.sample_block = SampleBlock(betas, learn_alpha)
-        self.output_size = config.model.output_size
-        self.in_ch = config.model.in_channels
-        self.out_ch = config.model.out_ch
-        self.detach = config.training.detach
-        
-        if self.in_ch != 3:
-            self.pixel_unshuffle = nn.PixelUnshuffle(2)
-        if  self.out_ch != 3:
-            self.pixel_shuffle = nn.PixelShuffle(2)
-
-    def forward(self, x, t, last_t=None, true_x=None):
-        et = super().forward(x, true_x)
-        if self.pred_mean:
-            # layer t 是输入t, 输出t-1
-            et = self.sample_block(et, x, t, last_t)
-        return et
     
-    def sample(self, x, i, j, true_x=None):
-        # et = self.forward_with_shuffle(x, true_x)
-        et = self.forward_with_shuffle(x) # 这里小心修改了，不再使用cross_attention
+    def forward(self, x, i, j, true_x=None):
+        et = super().forward(x)
         if true_x is None:
-            if self.detach:
-                x = x.detach()
             x = self.sample_block(et, x, i, j)
         else:
             x = self.sample_block(et, true_x, i, j)
@@ -412,19 +381,22 @@ class Model(nn.Module):
         })
         self.seq = seq
         self.betas = betas
-    
-    
-    def forward(self, x, t=None, last_t=None):
-        et = self.models[str(t)](x, t, last_t)
-        return et
 
     def __getitem__(self, i):
         return self.models[str(i)]
     
+    def forward(self, x, true_x_seq=None):
+        outputs = []
+        for k, (t, t_next) in enumerate(zip(reversed(self.seq[1:]), reversed(self.seq[:-1]))):     
+            if true_x_seq is not None:
+                x = self.models[str(t)](x, t, t_next, true_x_seq[k])    
+            else:
+                x = self.models[str(t)](x, t, t_next)                
+            outputs.append(x)
+        return outputs
+
     def sample(self, x):
-        for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):        
-            x = self.models[str(i)].sample(x, i, j)                
-        return x
+        return self.forward(x)[-1]
 
 """
 10:

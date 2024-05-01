@@ -104,9 +104,6 @@ class Diffusion(object):
         at = (1-self.betas).cumprod(dim=0)
         if self.config.training.train_type == "end2end":
             t = np.array(list(reversed(self.seq[1:])))
-            # self.loss_weight = 3.18e-06*np.exp(0.71*(t/50+1.75))+ 0.010
-            # self.loss_weight = torch.zeros(len(self.seq[1:]))
-            # self.loss_weight[-1] = 1
             self.loss_weight = 1/at[t].view(-1, 1, 1, 1)
 
     def get_states(self):
@@ -232,121 +229,67 @@ class Diffusion(object):
                 x = x.to(self.device)
                 x = data_transform(self.config, x)
                 x_T = torch.randn_like(x)
-                x0 = x
 
                 if self.config.training.train_type == "end2end":
-                    if self.config.training.ground_truth == 'A':
-                        true_xs = [x]
-                        true_x = x
-                        for i, j in zip(self.seq[1:], self.seq[:-1]):
-                            at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
-                            at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
-                            true_x = (at/at_1).sqrt() * true_x + (1 - at/at_1).sqrt() * torch.randn_like(true_x)
-                            true_xs.append(true_x)
-                        x = true_xs[-1]
-                        true_x_seq =  list(reversed(true_xs[1:]))
-                        true_x_seq_next = list(reversed(true_xs[:-1]))
-                    elif self.config.training.ground_truth == 'B':
-                        true_xs = []
-                        for i in self.seq:
-                            at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
-                            true_x = at.sqrt() * x + (1 - at).sqrt() * torch.randn_like(x)
-                            true_xs.append(true_x)
-                        x = true_xs[-1]
-                        true_x_seq =  list(reversed(true_xs[1:]))
-                        true_x_seq_next = list(reversed(true_xs[:-1]))
-                    elif self.config.training.ground_truth == 'D':
-                        at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
-                        true_x = at.sqrt() * x + (1-at).sqrt() * x_T
-                        true_xs = [true_x]
-                        for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
-                            at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
-                            at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
-                            true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
-                            true_xs.append(true_x)
-                            
-                        x = true_xs[0]
-                        true_x_seq = true_xs[:-1]
-                        true_x_seq_next = true_xs[1:]  
-                    else:
-                        raise ValueError(f"{self.config.training.ground_truth}")                      
-                losses = []
-                for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
-
-                    if self.config.training.train_type == "end2end":
-                        if self.config.training.use_true_x_as_x:
-                            h  = true_x_seq[k]
-                        else:
-                            h = x
-                            
-                        if self.config.training.use_true_x:
-                            x = model[str(t)].sample(h, t, t_next, true_x_seq[k]) 
-                        else:
-                            x = model[str(t)].sample(h, t, t_next)
-                            
-                        loss = x - true_x_seq_next[k]
+                   
+                    at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
+                    true_x = at.sqrt() * x + (1-at).sqrt() * x_T
+                    true_xs = [true_x]
+                    for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
+                        at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+                        at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
+                        true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
+                        true_xs.append(true_x)
                         
-                        if self.config.training.use_adv_loss:
-                            at = (1-self.betas).cumprod(dim=0)[t].view(-1, 1, 1, 1)
-                            at_1 = (1-self.betas).cumprod(dim=0)[t_next].view(-1, 1, 1, 1)
-                        
-                            
-                            coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
-                            if self.config.training.detach:
-                                h = h.detach()
-                            loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))
-
-                        loss = loss.square().sum((1,2,3)).mean(dim=0)
+                    x = true_xs[0]
+                    true_x_seq = true_xs[:-1]
+                    true_x_seq_next = true_xs[1:]  
                                      
-                    elif self.config.training.train_type == "layer_v2":
-                        loss = layer_loss_v2(model, x, t, t_next, x_T, self.betas)
-                    elif self.config.training.train_type == "layer":
-                        loss = layer_loss(model, x, t, x_T, self.betas)
-                    else:
-                        raise ValueError(f"{self.config.training.train_type}")
+                losses = []
+
+                if self.config.training.use_true_x:
+                    outputs = model(x, true_x_seq)                       
+                else:
+                    outputs = model(x)
+                
+                for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
+                    loss = outputs[k] - true_x_seq_next[k]
+                
+                    if self.config.training.use_adv_loss:
+                        at = (1-self.betas).cumprod(dim=0)[t].view(-1, 1, 1, 1)
+                        at_1 = (1-self.betas).cumprod(dim=0)[t_next].view(-1, 1, 1, 1)
                     
-                    losses.append(loss)
- 
-                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)
+                        
+                        coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
+                        loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))
+
+                    loss = loss.square().sum((1,2,3)).mean(dim=0)
                     
+                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)      
                     logging.info(
                         f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (epoch_step+1)}"
                     )
-                
+                       
+                    losses.append(loss)
+                    
                 step += 1
                             
                 optimizer.zero_grad()
-                if self.config.training.train_type == "end2end":
-                    if config.training.use_loss_weight:
-                        losses = [weight*loss for weight, loss in zip(self.loss_weight, losses)]
-                    loss_sum = torch.stack(losses)               
-                    loss_sum = loss_sum.sum()
-                    loss_sum.backward()
-
-                else:
-                    for loss in losses:
-                        loss.backward()
-
-                use_whole_model = self.config.training.train_type == "end2end" or self.config.model.use_time_embed
-
-                if use_whole_model:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), config.optim.grad_clip
-                    )
-                else:
-                    for t in seq:
-                        torch.nn.utils.clip_grad_norm_(
-                            model[t].parameters(), config.optim.grad_clip
-                        )
-        
+                
+                if config.training.use_loss_weight:
+                    losses = [weight*loss for weight, loss in zip(self.loss_weight, losses)]
+                loss_sum = torch.stack(losses)               
+                loss_sum = loss_sum.sum()
+                loss_sum.backward()
+   
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), config.optim.grad_clip
+                )
+                
                 optimizer.step()
 
                 if self.config.model.ema:
-                    if use_whole_model:
-                        ema.update(model)
-                    else:
-                        for t in seq:
-                            ema.update(model, t)
+                    ema.update(model)
                     
                 if step % self.config.training.sample_freq == 0:
                     # path = os.path.join(self.args.log_path, '%d.png' % step)
