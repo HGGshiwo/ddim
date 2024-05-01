@@ -535,7 +535,6 @@ class Diffusion(object):
         for i, (x, y) in enumerate(train_loader):
             x = x.to(self.device)
             x = data_transform(self.config, x)
-            x0 = x
             x_T = torch.randn_like(x)
             at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
             true_x = at.sqrt() * x + (1-at).sqrt() * x_T
