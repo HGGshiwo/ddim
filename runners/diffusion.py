@@ -70,8 +70,6 @@ class Diffusion(L.LightningModule):
         self.args = args
         self.config = config
         
-
-        self.model_var_type = config.model.var_type
         betas = get_beta_schedule(
             beta_schedule=config.diffusion.beta_schedule,
             beta_start=config.diffusion.beta_start,
@@ -83,24 +81,14 @@ class Diffusion(L.LightningModule):
         self.num_timesteps = self.betas.shape[0]
 
         skip = self.num_timesteps // self.config.diffusion.num_block
-        self._seq = range(0, self.num_timesteps, skip)
+        self.seq = range(0, self.num_timesteps, skip)
         at = (1-self.betas).cumprod(dim=0)
         
-        t = np.array(list(reversed(self._seq[1:])))
+        t = np.array(list(reversed(self.seq[1:])))
         self.register_buffer('loss_weight', 1/at[t].view(-1, 1, 1, 1))
         
-        self.model = Model(self.config, self.betas, self._seq)
+        self.model = Model(self.config, self.betas, self.seq)
         self.ema = ModelEma(self.model, decay=self.config.model.ema_rate)
-        self.seq = self._seq[1:]
-        self.seq_next = self._seq[:-1]
-        
-        if self.args.train:
-        
-            if hasattr(self.config.training, "layer"):
-                train_layer = self.config.training.layer
-                self.seq = [self._seq[i] for i in train_layer]
-                self.seq_next = [self._seq[i-1] for i in train_layer]
-
     
         if self.local_rank == 0:
             total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad) 
@@ -121,15 +109,23 @@ class Diffusion(L.LightningModule):
             
 
     def training_step(self, batch, batch_idx):
-
+        seq = self.seq[1:]
+        seq_next = self.seq[:-1]
+        
+        if self.args.train:
+        
+            if hasattr(self.config.training, "layer"):
+                train_layer = self.config.training.layer
+                seq = [self.seq[i] for i in train_layer]
+                seq_next = [self.seq[i-1] for i in train_layer]
         x, y = batch 
         x = data_transform(self.config, x)
         x_T = torch.randn_like(x)
 
-        at = (1-self.betas).cumprod(dim=0)[self._seq[-1]].view(-1, 1, 1, 1)
+        at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
         true_x = at.sqrt() * x + (1-at).sqrt() * x_T
         true_xs = [true_x]
-        for i, j in zip(reversed(self.seq), reversed(self.seq_next)):
+        for i, j in zip(reversed(seq), reversed(seq_next)):
             at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
             at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
             true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
@@ -147,7 +143,7 @@ class Diffusion(L.LightningModule):
             outputs = self.model(x)
         
         h = x
-        for k, (t, t_next) in enumerate(zip(reversed(self.seq), reversed(self.seq_next))):
+        for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
             loss = outputs[k] - true_x_seq_next[k]
         
             if self.config.training.use_adv_loss:

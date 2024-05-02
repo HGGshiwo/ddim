@@ -214,9 +214,9 @@ def main():
                 strategy='ddp_find_unused_parameters_true',
                 enable_progress_bar=False,
                 logger=tb_logger,
+                gradient_clip_val=config.optim.grad_clip,
             )
             trainer.fit(model=runner, train_dataloaders=train_loader)
-            runner.train()
             
     except Exception:
         logging.error(traceback.format_exc())
