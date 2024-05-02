@@ -66,7 +66,6 @@ def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_time
 class Diffusion(L.LightningModule):
     def __init__(self, args, config):
         super().__init__()
-        self.automatic_optimization=False
         
         self.args = args
         self.config = config
@@ -147,9 +146,9 @@ class Diffusion(L.LightningModule):
 
             loss = loss.square().sum((1,2,3)).mean(dim=0)
             
-            
-            self.log(f"layer{t}/loss", loss) 
+            # 只记录0号的损失
             if self.local_rank == 0:
+                self.log(f"layer{t}/loss", loss)
                 logging.info(
                     f"epoch: {self.current_epoch} layer: {t} step: {self.global_step}, loss: {loss.item()}"
                 )
@@ -161,19 +160,18 @@ class Diffusion(L.LightningModule):
         loss_sum = torch.stack(losses)               
         loss_sum = loss_sum.sum()
         
-        self.manual_backward(loss_sum)
+        return loss_sum
 
-        opt = self.optimizers()
-        self.clip_gradients(opt, gradient_clip_val=self.config.optim.grad_clip, gradient_clip_algorithm="norm")
-        
-        opt.step()
+    
+    def on_train_batch_end(self, *args, **kwargs):
 
         if self.config.model.ema:
             self.ema.update(self.model)
             
         if self.global_step % self.config.training.sample_freq == 0:
-            path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
-            self.sample_image(self.model, path2)
+            if self.local_rank == 0:
+                path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
+                self.sample_image(self.model, path2)
 
     def configure_optimizers(self):
         optimizer = get_optimizer(self.config, self.model.parameters())
@@ -195,7 +193,7 @@ class Diffusion(L.LightningModule):
             config.data.channels,
             config.data.image_size,
             config.data.image_size,
-            device=model.device,
+            device=self.device,
         )
 
         # NOTE: This means that we are producing each predicted x0, not x_{t-1} at timestep t.

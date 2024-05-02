@@ -184,7 +184,11 @@ def main():
     logging.info("Exp comment = {}".format(args.comment))
     
     try:
-        runner = Diffusion(args, config)
+        if args.train and not args.resume_training:
+            runner = Diffusion(args, config)
+        else:
+            runner = Diffusion.load_from_checkpoint()
+            
         if args.sample:
             runner.sample2()
         elif args.loss:
