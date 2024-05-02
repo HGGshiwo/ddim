@@ -12,12 +12,14 @@ import lightning as L
 from datasets import get_dataset
 import torch.utils.data as data
 from lightning.pytorch import loggers as pl_loggers
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint
+from lightning.pytorch.utilities.rank_zero import rank_zero_only
 
 from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
 
+is_zero_rank = (os.getenv("LOCAL_RANK", '0') == '0')
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description=globals()["__doc__"])
@@ -87,41 +89,46 @@ def parse_args_and_config():
     args = parser.parse_args()
     
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu  
+    args.train = not args.sample and not args.loss and not args.fid 
     
-    if args.doc is None:
-        args.doc = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    args.log_path = os.path.join(args.exp, "logs", args.doc)
-
     # parse config file
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
- 
+
     new_config = dict2namespace(config)
-
-    args.train = not args.sample and not args.loss and not args.fid 
+    
+    
+    if args.doc is None:
+        if is_zero_rank:
+            args.doc = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            args.log_path = os.path.join(args.exp, "logs", args.doc)
+        else:
+            args.log_path = None
+    
     if args.train:
-        if not args.resume_training:
-            os.makedirs(args.log_path)
+        if is_zero_rank: 
+            if not args.resume_training:
+                os.makedirs(args.log_path)
 
-            with open(os.path.join(args.log_path, "config.yml"), "w") as f:
-                yaml.dump(config, f, default_flow_style=False)
+                with open(os.path.join(args.log_path, "config.yml"), "w") as f:
+                    yaml.dump(config, f, default_flow_style=False)
 
-        # setup logger
-        level = getattr(logging, args.verbose.upper(), None)
-        if not isinstance(level, int):
-            raise ValueError("level {} not supported".format(args.verbose))
+            # setup logger
+            level = getattr(logging, args.verbose.upper(), None)
+            if not isinstance(level, int):
+                raise ValueError("level {} not supported".format(args.verbose))
 
-        handler1 = logging.StreamHandler()
-        handler2 = logging.FileHandler(os.path.join(args.log_path, "stdout.txt"))
-        formatter = logging.Formatter(
-            "%(levelname)s - %(filename)s - %(asctime)s - %(message)s"
-        )
-        handler1.setFormatter(formatter)
-        handler2.setFormatter(formatter)
-        logger = logging.getLogger()
-        logger.addHandler(handler1)
-        logger.addHandler(handler2)
-        logger.setLevel(level)
+            handler1 = logging.StreamHandler()
+            handler2 = logging.FileHandler(os.path.join(args.log_path, "stdout.txt"))
+            formatter = logging.Formatter(
+                "%(levelname)s - %(filename)s - %(asctime)s - %(message)s"
+            )
+            handler1.setFormatter(formatter)
+            handler2.setFormatter(formatter)
+            logger = logging.getLogger()
+            logger.addHandler(handler1)
+            logger.addHandler(handler2)
+            logger.setLevel(level)
 
     else:
         level = getattr(logging, args.verbose.upper(), None)
@@ -137,25 +144,20 @@ def parse_args_and_config():
         logger.addHandler(handler1)
         logger.setLevel(level)
 
-        if args.sample:
-            os.makedirs(os.path.join(args.exp, "image_samples"), exist_ok=True)
-            args.image_folder = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-            args.image_folder = os.path.join(
-                args.exp, "image_samples", args.image_folder
-            )
-            if not os.path.exists(args.image_folder):
-                os.makedirs(args.image_folder)
-        
-        if args.fid and hasattr(new_config.sampling, "ckpt"):
-            if not os.path.exists(args.log_path):
-                os.makedirs(args.log_path)
-                with open(os.path.join(args.log_path, "config.yml"), "w") as f:
-                    yaml.dump(config, f, default_flow_style=False)
-
-    # add device
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if args.sample:
+        os.makedirs(os.path.join(args.exp, "image_samples"), exist_ok=True)
+        args.image_folder = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        args.image_folder = os.path.join(
+            args.exp, "image_samples", args.image_folder
+        )
+        if not os.path.exists(args.image_folder):
+            os.makedirs(args.image_folder)
     
-    new_config.device = device
+    if args.fid and hasattr(new_config.sampling, "ckpt"):
+        if not os.path.exists(args.log_path):
+            os.makedirs(args.log_path)
+            with open(os.path.join(args.log_path, "config.yml"), "w") as f:
+                yaml.dump(config, f, default_flow_style=False)
 
     # set random seed
     torch.manual_seed(args.seed)
@@ -176,13 +178,11 @@ def dict2namespace(config):
             new_value = value
         setattr(namespace, key, new_value)
     return namespace
-
-
-def main():
+               
+if __name__ == "__main__":
     args, config = parse_args_and_config()
-    logging.info("Writing log file to {}".format(args.log_path))
-    logging.info("Exp instance id = {}".format(os.getpid()))
-    logging.info("Exp comment = {}".format(args.comment))
+    if is_zero_rank:
+        logging.info("Writing log file to {}".format(args.log_path))
     
     try:
         if args.train and not args.resume_training:
@@ -196,7 +196,7 @@ def main():
             runner.loss()
         elif args.fid:
             runner.fid()
-        else:
+        else:                
             dataset, _ = get_dataset(args, config)
             train_loader = data.DataLoader(
                 dataset,
@@ -205,14 +205,16 @@ def main():
                 num_workers=config.data.num_workers,
             )
             
-            tb_logger = pl_loggers.TensorBoardLogger(save_dir=args.exp, name="tensorboard", version=args.doc)
-            
+            if is_zero_rank:
+                tb_logger = pl_loggers.TensorBoardLogger(save_dir=args.exp, name="tensorboard", version=args.doc)
+            else:
+                tb_logger = None 
+                
             checkpoint_callback = ModelCheckpoint(
                 dirpath=args.log_path, 
-                every_n_train_steps=config.training.snapshot_freq,
-                filename="ckpt.pth"
+                filename="ckpt.pth", 
+                every_n_train_steps=config.training.snapshot_freq
             )
-            
             trainer = L.Trainer(
                 accelerator="gpu", 
                 devices="auto", 
@@ -222,15 +224,10 @@ def main():
                 enable_progress_bar=False,
                 logger=tb_logger,
                 gradient_clip_val=config.optim.grad_clip,
-                callbacks=[checkpoint_callback]
+                callbacks=[checkpoint_callback],
+                log_every_n_steps=1,
             )
             trainer.fit(model=runner, train_dataloaders=train_loader)
             
     except Exception:
         logging.error(traceback.format_exc())
-
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

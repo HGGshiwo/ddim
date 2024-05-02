@@ -1,34 +1,17 @@
 import os
 import logging
-import time
-import glob
 
 import numpy as np
-import tqdm
 import torch
-import torch.utils.data as data
 
 from models.model import Model
-from models.diffusion import Model as UNet
 from models.model_ema import ModelEma
 from functions import get_optimizer
-from functions.losses import end2end_loss, layer_loss, layer_loss_v2
-from datasets import get_dataset, data_transform, inverse_data_transform
-from functions.ckpt_util import get_ckpt_path
+from datasets import data_transform, inverse_data_transform
 from score.both import get_inception_and_fid_score
-from torchvision.utils import make_grid, save_image
-import random
+from torchvision.utils import save_image
 from tqdm import trange
-import torch.utils.tensorboard as tb
-import copy
 import lightning as L
-
-def torch2hwcuint8(x, clip=False):
-    if clip:
-        x = torch.clamp(x, -1, 1)
-    x = (x + 1.0) / 2.0
-    return x
-
 
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
     def sigmoid(x):
@@ -101,9 +84,9 @@ class Diffusion(L.LightningModule):
     def on_train_batch_end(self, *args, **kwargs):
         if self.config.model.ema:
             self.ema.update(self.model)
-            
-        if self.global_step % self.config.training.sample_freq == 0:
-            if self.local_rank == 0:
+        
+        if self.local_rank == 0:    
+            if self.global_step % self.config.training.sample_freq == 0:
                 path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
                 self.sample_image(self.model, path2)
             
