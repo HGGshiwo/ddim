@@ -197,7 +197,12 @@ def main():
             runner.fid()
         else:
             dataset, _ = get_dataset(args, config)
-            train_loader = data.DataLoader(dataset)
+            train_loader = data.DataLoader(
+                dataset,
+                batch_size=config.training.batch_size,
+                shuffle=True,
+                num_workers=config.data.num_workers,
+            )
             
             tb_logger = pl_loggers.TensorBoardLogger(save_dir=args.exp, name="tensorboard", version=args.doc)
             
