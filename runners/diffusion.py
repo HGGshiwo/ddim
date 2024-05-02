@@ -106,6 +106,20 @@ class Diffusion(L.LightningModule):
             total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad) 
             logging.info(f"param: {total_params}")
 
+    def configure_optimizers(self):
+        optimizer = get_optimizer(self.config, self.model.parameters())
+        return optimizer
+    
+    def on_train_batch_end(self, *args, **kwargs):
+        if self.config.model.ema:
+            self.ema.update(self.model)
+            
+        if self.global_step % self.config.training.sample_freq == 0:
+            if self.local_rank == 0:
+                path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
+                self.sample_image(self.model, path2)
+            
+
     def training_step(self, batch, batch_idx):
 
         x, y = batch 
@@ -162,20 +176,6 @@ class Diffusion(L.LightningModule):
         
         return loss_sum
 
-    
-    def on_train_batch_end(self, *args, **kwargs):
-
-        if self.config.model.ema:
-            self.ema.update(self.model)
-            
-        if self.global_step % self.config.training.sample_freq == 0:
-            if self.local_rank == 0:
-                path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
-                self.sample_image(self.model, path2)
-
-    def configure_optimizers(self):
-        optimizer = get_optimizer(self.config, self.model.parameters())
-        return optimizer
     
     def sample(self):
         model, ema = self.create_model()
