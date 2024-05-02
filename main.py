@@ -8,6 +8,10 @@ import os
 import torch
 import numpy as np
 import datetime
+import lightning as L
+from datasets import get_dataset
+import torch.utils.data as data
+from lightning.pytorch import loggers as pl_loggers
 
 from runners.diffusion import Diffusion
 
@@ -149,7 +153,7 @@ def parse_args_and_config():
 
     # add device
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    logging.info("Using device: {}".format(device))
+    
     new_config.device = device
 
     # set random seed
@@ -159,7 +163,6 @@ def parse_args_and_config():
         torch.cuda.manual_seed_all(args.seed)
 
     torch.backends.cudnn.benchmark = True
-
     return args, new_config
 
 
@@ -189,7 +192,23 @@ def main():
         elif args.fid:
             runner.fid()
         else:
+            dataset, _ = get_dataset(args, config)
+            train_loader = data.DataLoader(dataset)
+            
+            tb_logger = pl_loggers.TensorBoardLogger(save_dir=args.exp, name="tensorboard", version=args.doc)
+            
+            trainer = L.Trainer(
+                accelerator="gpu", 
+                devices="auto", 
+                default_root_dir=args.log_path, 
+                max_epochs=config.training.n_epochs,
+                strategy='ddp_find_unused_parameters_true',
+                enable_progress_bar=False,
+                logger=tb_logger,
+            )
+            trainer.fit(model=runner, train_dataloaders=train_loader)
             runner.train()
+            
     except Exception:
         logging.error(traceback.format_exc())
 

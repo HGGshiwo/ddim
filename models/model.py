@@ -5,7 +5,7 @@ import copy
 import torch.nn.functional as F
 
 def compute_alpha(beta, t):
-    beta = torch.cat([torch.zeros(1, requires_grad=False).to(beta.device), beta], dim=0)
+    beta = torch.cat([torch.zeros(1, requires_grad=False).to(beta), beta], dim=0)
     a = (1 - beta).cumprod(dim=0).index_select(0, t + 1).view(-1, 1, 1, 1)
     return a
 
@@ -330,7 +330,7 @@ class UnetBlock(_UnetBlock):
 class SampleBlock(nn.Module):
     def __init__(self, betas, learn_alpha) -> None:
         super().__init__()
-        self.betas = betas
+        self.register_buffer("betas", betas)
         self.learn_alpha = learn_alpha
         if learn_alpha:
             self.embd_a = nn.Parameter(torch.zeros(1, requires_grad=True)) 
@@ -339,8 +339,8 @@ class SampleBlock(nn.Module):
     def forward(self, et, x, i, j):
          # 直接预测均值
         n = x.size(0)
-        t = (torch.ones(n, requires_grad=False) * i).to(x.device)
-        next_t = (torch.ones(n, requires_grad=False) * j).to(x.device)    
+        t = (torch.ones(n, requires_grad=False) * i).to(x)
+        next_t = (torch.ones(n, requires_grad=False) * j).to(x)    
         at = compute_alpha(self.betas, t.long())
         at_next = compute_alpha(self.betas, next_t.long())
         a = at_next.sqrt() / at.sqrt()

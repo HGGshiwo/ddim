@@ -21,6 +21,7 @@ import random
 from tqdm import trange
 import torch.utils.tensorboard as tb
 import copy
+import lightning as L
 
 def torch2hwcuint8(x, clip=False):
     if clip:
@@ -62,17 +63,14 @@ def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_time
     return betas
 
 
-class Diffusion(object):
-    def __init__(self, args, config, device=None):
+class Diffusion(L.LightningModule):
+    def __init__(self, args, config):
+        super().__init__()
+        self.automatic_optimization=False
+        
         self.args = args
         self.config = config
-        if device is None:
-            device = (
-                torch.device("cuda")
-                if torch.cuda.is_available()
-                else torch.device("cpu")
-            )
-        self.device = device
+        
 
         self.model_var_type = config.model.var_type
         betas = get_beta_schedule(
@@ -81,235 +79,105 @@ class Diffusion(object):
             beta_end=config.diffusion.beta_end,
             num_diffusion_timesteps=config.diffusion.num_diffusion_timesteps,
         )
-        betas = self.betas = torch.from_numpy(betas).float().to(self.device)
-        self.num_timesteps = betas.shape[0]
-
-        alphas = 1.0 - betas
-        alphas_cumprod = alphas.cumprod(dim=0)
-        alphas_cumprod_prev = torch.cat(
-            [torch.ones(1).to(device), alphas_cumprod[:-1]], dim=0
-        )
-        posterior_variance = (
-            betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
-        )
-        if self.model_var_type == "fixedlarge":
-            self.logvar = betas.log()
-            # torch.cat(
-            # [posterior_variance[1:2], betas[1:]], dim=0).log()
-        elif self.model_var_type == "fixedsmall":
-            self.logvar = posterior_variance.clamp(min=1e-20).log()
+        self.register_buffer("betas", torch.from_numpy(betas).float())
+        
+        self.num_timesteps = self.betas.shape[0]
 
         skip = self.num_timesteps // self.config.diffusion.num_block
-        self.seq = range(0, self.num_timesteps, skip)
+        self._seq = range(0, self.num_timesteps, skip)
         at = (1-self.betas).cumprod(dim=0)
-        if self.config.training.train_type == "end2end":
-            t = np.array(list(reversed(self.seq[1:])))
-            self.loss_weight = 1/at[t].view(-1, 1, 1, 1)
-
-    def get_states(self):
-        if hasattr(self.config.sampling, "ckpt"):
-            if os.path.exists(os.path.join(self.args.log_path, "ckpt.pth")):
-                return torch.load(os.path.join(self.args.log_path, "ckpt.pth"))
-            
-            ckpt = self.config.sampling.ckpt
-            ckpt_list = []
-            for c in ckpt:
-                ckpt_list.extend([c['value']]*c['num'])
-            assert len(ckpt_list) == len(self.seq), f"{len(ckpt_list)}, {len(self.seq)}"
-            # 建立索引
-            src_states = {}
-            for layer_name, doc in zip(self.seq, ckpt_list):
-                if doc not in src_states:
-                    src_states[doc] = []
-                src_states[doc].append(layer_name)
-                
-            states = [{} for i in range(2)]
-            for doc, layers in src_states.items():
-                _state = torch.load(f"./exp/logs/{doc}/ckpt.pth", map_location=self.config.device)
-                for layer_name in layers:
-                    for i in [0, -1]:
-                        for k, v in _state[i].items():  
-                            if f"models.{layer_name}." in k:  
-                                states[i][k] = v.clone()
-                del _state
-            torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
-            return states  
-        else:
-            if self.config.use_pretrained:
-                ckpt_path = os.path.join("exp", f"model-790000.ckpt")
-            else:
-                ckpt_path = os.path.join(self.args.log_path, "ckpt.pth")
-            states = torch.load(ckpt_path, map_location=self.config.device)
-        return states
-
-    def create_model(self):
-        if self.config.use_pretrained:
-            model = UNet(self.config, self.betas, self.seq) 
-            states = self.get_states()
-            model.load_state_dict(states, strict=True)
-            model = model.to(self.device)
-            ema = ModelEma(model, decay=self.config.model.ema_rate)
-        else:
-            model_class = UNet if self.config.model.use_time_embed else Model
-            model = model_class(self.config, self.betas, self.seq)
-            if not self.args.train:
-                states = self.get_states()
-                model.load_state_dict(states[0], strict=True)
-            
-            model = model.to(self.device)
-            if self.config.model.ema:
-                ema = ModelEma(model, decay=self.config.model.ema_rate)
-                if not self.args.train:
-                    ema.load_state_dict(states[-1])
-            else:
-                ema = None
         
-        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
-        logging.info(f"param: {total_params}")
+        t = np.array(list(reversed(self._seq[1:])))
+        self.register_buffer('loss_weight', 1/at[t].view(-1, 1, 1, 1))
+        
+        self.model = Model(self.config, self.betas, self._seq)
+        self.ema = ModelEma(self.model, decay=self.config.model.ema_rate)
+        self.seq = self._seq[1:]
+        self.seq_next = self._seq[:-1]
+        
+        if self.args.train:
+        
+            if hasattr(self.config.training, "layer"):
+                train_layer = self.config.training.layer
+                self.seq = [self._seq[i] for i in train_layer]
+                self.seq_next = [self._seq[i-1] for i in train_layer]
 
-        return model, ema
-
-    def train(self):
-        args, config = self.args, self.config
-        tb_path = os.path.join(args.exp, "tensorboard", args.doc)
-        tb_logger = tb.SummaryWriter(log_dir=tb_path)
-        dataset, test_dataset = get_dataset(args, config)
-        train_loader = data.DataLoader(
-            dataset,
-            batch_size=config.training.batch_size,
-            shuffle=True,
-            num_workers=config.data.num_workers,
-        )
-        model, ema = self.create_model()
-        optimizer = get_optimizer(self.config, model.parameters())
     
-        seq = self.seq[1:]
-        seq_next = self.seq[:-1]
+        if self.local_rank == 0:
+            total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad) 
+            logging.info(f"param: {total_params}")
 
-        if hasattr(self.config.training, "layer"):
-            train_layer = self.config.training.layer
-            seq = [self.seq[i] for i in train_layer]
-            seq_next = [self.seq[i-1] for i in train_layer]
+    def training_step(self, batch, batch_idx):
 
-        start_epoch, step = 0, 0
-        if self.args.resume_training:
-            states = torch.load(os.path.join(self.args.log_path, "ckpt.pth"))
-            model.load_state_dict(states[0])
+        x, y = batch 
+        x = data_transform(self.config, x)
+        x_T = torch.randn_like(x)
 
-            states[1]["param_groups"][0]["eps"] = self.config.optim.eps
-            optimizer.load_state_dict(states[1])
-            start_epoch = states[2]
-            step = states[3]
-            if self.config.model.ema:
-                ema.load_state_dict(states[4])
-        elif hasattr(self.config.training, "layer"):
-            states = torch.load(self.config.training.use_ckpt, map_location="cpu")
-            def check(k):
-                for i in seq:
-                    if f".models.{i}." in k:
-                        return False
-                return True
+        at = (1-self.betas).cumprod(dim=0)[self._seq[-1]].view(-1, 1, 1, 1)
+        true_x = at.sqrt() * x + (1-at).sqrt() * x_T
+        true_xs = [true_x]
+        for i, j in zip(reversed(self.seq), reversed(self.seq_next)):
+            at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
+            at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
+            true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
+            true_xs.append(true_x)
             
-            state = {k: v for k, v in states[-1].items() if check(k)}
-            ema = ema.cpu()
-            ema.load_state_dict(state, strict=False)
-            ema = ema.to(self.device)
+        x = true_xs[0]
+        true_x_seq = true_xs[:-1]
+        true_x_seq_next = true_xs[1:]  
+                                
+        losses = []
 
-        for epoch in range(start_epoch, self.config.training.n_epochs):
+        if self.config.training.use_true_x:
+            outputs = self.model(x, true_x_seq)                       
+        else:
+            outputs = self.model(x)
+        
+        h = x
+        for k, (t, t_next) in enumerate(zip(reversed(self.seq), reversed(self.seq_next))):
+            loss = outputs[k] - true_x_seq_next[k]
+        
+            if self.config.training.use_adv_loss:
+                at = (1-self.betas).cumprod(dim=0)[t].view(-1, 1, 1, 1)
+                at_1 = (1-self.betas).cumprod(dim=0)[t_next].view(-1, 1, 1, 1)
             
-            model.train()  
+                coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
+                loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))
+                h = outputs[k]
+
+            loss = loss.square().sum((1,2,3)).mean(dim=0)
             
-            data_start = time.time()
-            data_time = 0
             
-            for epoch_step, (x, y) in enumerate(train_loader):                
-                
-                data_time += time.time() - data_start
-                
-                x = x.to(self.device)
-                x = data_transform(self.config, x)
-                x_T = torch.randn_like(x)
-
-                at = (1-self.betas).cumprod(dim=0)[self.seq[-1]].view(-1, 1, 1, 1)
-                true_x = at.sqrt() * x + (1-at).sqrt() * x_T
-                true_xs = [true_x]
-                for i, j in zip(reversed(self.seq[1:]), reversed(self.seq[:-1])):
-                    at = (1-self.betas).cumprod(dim=0)[i].view(-1, 1, 1, 1)
-                    at_1 = (1-self.betas).cumprod(dim=0)[j].view(-1, 1, 1, 1)
-                    true_x = at_1.sqrt() * x + (1 - at_1).sqrt() * (true_x - at.sqrt() * x) / (1-at).sqrt()
-                    true_xs.append(true_x)
-                    
-                x = true_xs[0]
-                true_x_seq = true_xs[:-1]
-                true_x_seq_next = true_xs[1:]  
-                                     
-                losses = []
-
-                if self.config.training.use_true_x:
-                    outputs = model(x, true_x_seq)                       
-                else:
-                    outputs = model(x)
-                
-                h = x
-                for k, (t, t_next) in enumerate(zip(reversed(seq), reversed(seq_next))):
-                    loss = outputs[k] - true_x_seq_next[k]
-                
-                    if self.config.training.use_adv_loss:
-                        at = (1-self.betas).cumprod(dim=0)[t].view(-1, 1, 1, 1)
-                        at_1 = (1-self.betas).cumprod(dim=0)[t_next].view(-1, 1, 1, 1)
-                    
-                        
-                        coeff = (1-at_1).sqrt() - (at_1/at).sqrt() * (1-at).sqrt()
-                        loss = (loss - (at_1/at).sqrt()*(h-true_x_seq[k]))
-                        h = outputs[k]
-
-                    loss = loss.square().sum((1,2,3)).mean(dim=0)
-                    
-                    tb_logger.add_scalar(f"layer{t}/loss", loss, global_step=step)      
-                    logging.info(
-                        f"epoch: {epoch} layer: {t} step: {step}, loss: {loss.item()}, data time: {data_time / (epoch_step+1)}"
-                    )
-                       
-                    losses.append(loss)
-                    
-                step += 1
-                            
-                optimizer.zero_grad()
-                
-                if config.training.use_loss_weight:
-                    losses = [weight*loss for weight, loss in zip(self.loss_weight, losses)]
-                loss_sum = torch.stack(losses)               
-                loss_sum = loss_sum.sum()
-                loss_sum.backward()
-   
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), config.optim.grad_clip
+            self.log(f"layer{t}/loss", loss) 
+            if self.local_rank == 0:
+                logging.info(
+                    f"epoch: {self.current_epoch} layer: {t} step: {self.global_step}, loss: {loss.item()}"
                 )
                 
-                optimizer.step()
+            losses.append(loss)
+        
+        if self.config.training.use_loss_weight:
+            losses = [weight*loss for weight, loss in zip(self.loss_weight, losses)]
+        loss_sum = torch.stack(losses)               
+        loss_sum = loss_sum.sum()
+        
+        self.manual_backward(loss_sum)
 
-                if self.config.model.ema:
-                    ema.update(model)
-                    
-                if step % self.config.training.sample_freq == 0:
-                    # path = os.path.join(self.args.log_path, '%d.png' % step)
-                    # self.sample_image(ema.module, path)
-                    path2 = os.path.join(self.args.log_path, '%d_model.png' % step)
-                    self.sample_image(model, path2)
+        opt = self.optimizers()
+        self.clip_gradients(opt, gradient_clip_val=self.config.optim.grad_clip, gradient_clip_algorithm="norm")
+        
+        opt.step()
 
-                if step % self.config.training.snapshot_freq == 0:
-                    states = [
-                        model.state_dict(),
-                        optimizer.state_dict(),
-                        epoch,
-                        step,
-                    ]
-                    if self.config.model.ema:
-                        states.append(ema.state_dict())
+        if self.config.model.ema:
+            self.ema.update(self.model)
+            
+        if self.global_step % self.config.training.sample_freq == 0:
+            path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
+            self.sample_image(self.model, path2)
 
-                    torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
-                 
-                data_start = time.time()
+    def configure_optimizers(self):
+        optimizer = get_optimizer(self.config, self.model.parameters())
+        return optimizer
     
     def sample(self):
         model, ema = self.create_model()
@@ -327,7 +195,7 @@ class Diffusion(object):
             config.data.channels,
             config.data.image_size,
             config.data.image_size,
-            device=self.device,
+            device=model.device,
         )
 
         # NOTE: This means that we are producing each predicted x0, not x_{t-1} at timestep t.
