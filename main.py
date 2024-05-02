@@ -12,6 +12,7 @@ import lightning as L
 from datasets import get_dataset
 import torch.utils.data as data
 from lightning.pytorch import loggers as pl_loggers
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 from runners.diffusion import Diffusion
 
@@ -187,10 +188,10 @@ def main():
         if args.train and not args.resume_training:
             runner = Diffusion(args, config)
         else:
-            runner = Diffusion.load_from_checkpoint()
+            runner = Diffusion.load_from_checkpoint(f"{args.log_path}/ckpt.pth")
             
         if args.sample:
-            runner.sample2()
+            runner.sample()
         elif args.loss:
             runner.loss()
         elif args.fid:
@@ -206,6 +207,12 @@ def main():
             
             tb_logger = pl_loggers.TensorBoardLogger(save_dir=args.exp, name="tensorboard", version=args.doc)
             
+            checkpoint_callback = ModelCheckpoint(
+                dirpath=args.log_path, 
+                every_n_train_steps=config.training.snapshot_freq,
+                filename="ckpt.pth"
+            )
+            
             trainer = L.Trainer(
                 accelerator="gpu", 
                 devices="auto", 
@@ -215,6 +222,7 @@ def main():
                 enable_progress_bar=False,
                 logger=tb_logger,
                 gradient_clip_val=config.optim.grad_clip,
+                callbacks=[checkpoint_callback]
             )
             trainer.fit(model=runner, train_dataloaders=train_loader)
             
