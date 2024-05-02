@@ -8,8 +8,11 @@ import os
 import torch
 import numpy as np
 import datetime
-
+import lightning as L
 from runners.diffusion import Diffusion
+from datasets import get_dataset
+import torch.utils.data as data
+from lightning.pytorch import loggers as pl_loggers
 
 torch.set_printoptions(sci_mode=False)
 
@@ -189,7 +192,27 @@ def main():
         elif args.fid:
             runner.fid()
         else:
-            runner.train()
+            dataset, test_dataset = get_dataset(args, config)
+            train_loader = data.DataLoader(
+                dataset,
+                batch_size=config.training.batch_size,
+                shuffle=True,
+                num_workers=config.data.num_workers,
+            )
+            
+            tb_logger = pl_loggers.TensorBoardLogger(save_dir=args.exp, name="tensorboard", version=args.doc)
+                                     
+            trainer = L.Trainer(
+                accelerator="gpu", 
+                devices="auto", 
+                log_every_n_steps=1, 
+                gradient_clip_val=config.optim.grad_clip,
+                enable_progress_bar=False,
+                logger=tb_logger,
+                strategy='ddp_find_unused_parameters_true',
+            )
+            trainer.fit(model=runner, train_dataloaders=train_loader)
+            
     except Exception:
         logging.error(traceback.format_exc())
 
