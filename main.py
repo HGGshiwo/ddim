@@ -104,6 +104,8 @@ def parse_args_and_config():
             args.log_path = os.path.join(args.exp, "logs", args.doc)
         else:
             args.log_path = None
+    else:
+        args.log_path = os.path.join(args.exp, "logs", args.doc)
     
     if args.train:
         if is_zero_rank: 
@@ -185,10 +187,10 @@ if __name__ == "__main__":
         logging.info("Writing log file to {}".format(args.log_path))
     
     try:
-        if args.train and not args.resume_training:
+        if args.train:
             runner = Diffusion(args, config)
         else:
-            runner = Diffusion.load_from_checkpoint(f"{args.log_path}/ckpt.pth")
+            runner = Diffusion.load_from_checkpoint(f"{args.log_path}/ckpt.pth", args=args, config=config)
             
         if args.sample:
             runner.sample()
@@ -212,9 +214,10 @@ if __name__ == "__main__":
                 
             checkpoint_callback = ModelCheckpoint(
                 dirpath=args.log_path, 
-                filename="ckpt.pth", 
+                filename="ckpt", 
                 every_n_train_steps=config.training.snapshot_freq
             )
+            checkpoint_callback.FILE_EXTENSION = '.pth'
             trainer = L.Trainer(
                 accelerator="gpu", 
                 devices="auto", 
@@ -227,7 +230,11 @@ if __name__ == "__main__":
                 callbacks=[checkpoint_callback],
                 log_every_n_steps=1,
             )
-            trainer.fit(model=runner, train_dataloaders=train_loader)
+            if args.resume_training:
+                ckpt = f"{args.log_path}/ckpt.pth"
+            else:
+                ckpt = None
+            trainer.fit(model=runner, train_dataloaders=train_loader, ckpt_path=ckpt)
             
     except Exception:
         logging.error(traceback.format_exc())

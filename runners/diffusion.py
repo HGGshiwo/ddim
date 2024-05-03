@@ -49,7 +49,7 @@ def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_time
 class Diffusion(L.LightningModule):
     def __init__(self, args, config):
         super().__init__()
-        
+        self.save_hyperparameters()
         self.args = args
         self.config = config
         
@@ -157,9 +157,9 @@ class Diffusion(L.LightningModule):
 
     
     def sample(self):
-        model, ema = self.create_model()
+        model = self.model
         if not self.args.model:
-            model = ema.module
+            model = self.ema.module
         model.eval()
         self.sample_image(model, os.path.join(self.args.image_folder, f"sample.png"))
 
@@ -185,9 +185,9 @@ class Diffusion(L.LightningModule):
         save_image(x, path, nrow=16)
 
     def fid(self):
-        model, ema = self.create_model()
+        model = self.model
         if not self.args.model:
-            model = ema.module
+            model = self.ema.module
         model.eval()
         config = self.config.eval
         with torch.no_grad():
