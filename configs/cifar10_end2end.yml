@@ -35,7 +35,7 @@ diffusion:
     learn_alpha: false
 
 training:
-    batch_size: 32
+    batch_size: 16
     n_epochs: 10000
     n_iters: 5000000
     snapshot_freq: 500

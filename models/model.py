@@ -183,21 +183,15 @@ class ResnetBlock(nn.Module):
 class _UnetBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        out_ch, ch_mult = config.model.out_ch, tuple(config.model.ch_mult)
-        num_res_blocks = config.model.num_res_blocks
-        attn_resolutions = config.model.attn_resolutions
+        out_ch = config.model.out_ch
+        num_res_blocks = config.model.alpha * 2
+        
         dropout = config.model.dropout
         in_channels = config.model.in_channels
         resolution = config.data.image_size
-        resamp_with_conv = config.model.resamp_with_conv
-        num_timesteps = config.diffusion.num_diffusion_timesteps
         
-        if config.model.type == 'bayesian':
-            self.logvar = nn.Parameter(torch.zeros(num_timesteps))
-       
-        ch = config.model.ch_num
-        self.ch = ch
-        self.num_resolutions = len(ch_mult)
+        self.ch = config.model.beta * 16
+    
         self.num_res_blocks = num_res_blocks
         self.resolution = resolution
         self.in_channels = in_channels
@@ -209,67 +203,26 @@ class _UnetBlock(nn.Module):
                                        stride=1,
                                        padding=1)
 
-        curr_res = resolution
-        in_ch_mult = (1,)+ch_mult
-        self.down = nn.ModuleList()
-        block_in = None
-        for i_level in range(self.num_resolutions):
-            block = nn.ModuleList()
-            attn = nn.ModuleList()
-            block_in = ch*in_ch_mult[i_level]
-            block_out = ch*ch_mult[i_level]
-            for i_block in range(self.num_res_blocks):
-                block.append(ResnetBlock(in_channels=block_in,
-                                         out_channels=block_out,
-                                         dropout=dropout))
-                block_in = block_out
-                if curr_res in attn_resolutions:
-                    attn.append(AttnBlock(block_in))
-            down = nn.Module()
-            down.block = block
-            down.attn = attn
-            if i_level != self.num_resolutions-1:
-                down.downsample = Downsample(block_in, resamp_with_conv)
-                curr_res = curr_res // 2
-            self.down.append(down)
-
-        # middle
-        self.mid = nn.Module()
-        self.mid.block_1 = ResnetBlock(in_channels=block_in,
-                                       out_channels=block_in,
-                                       dropout=dropout)
-        self.mid.attn_1 = AttnBlock(block_in)
-        self.mid.block_2 = ResnetBlock(in_channels=block_in,
-                                       out_channels=block_in,
-                                       dropout=dropout)
-
-        # upsampling
-        self.up = nn.ModuleList()
-        for i_level in reversed(range(self.num_resolutions)):
-            block = nn.ModuleList()
-            attn = nn.ModuleList()
-            block_out = ch*ch_mult[i_level]
-            skip_in = ch*ch_mult[i_level]
-            for i_block in range(self.num_res_blocks+1):
-                if i_block == self.num_res_blocks:
-                    skip_in = ch*in_ch_mult[i_level]
-                block.append(ResnetBlock(in_channels=block_in+skip_in,
-                                         out_channels=block_out,
-                                         dropout=dropout))
-                block_in = block_out
-                if curr_res in attn_resolutions:
-                    attn.append(AttnBlock(block_in))
-            up = nn.Module()
-            up.block = block
-            up.attn = attn
-            if i_level != 0:
-                up.upsample = Upsample(block_in, resamp_with_conv)
-                curr_res = curr_res * 2
-            self.up.insert(0, up)  # prepend to get consistent order
-
+        self.down_res = nn.ModuleList()
+        self.down_atten = nn.ModuleList()
+        for i in range(self.num_res_blocks//2):
+            self.down_res.append(ResnetBlock(in_channels=self.ch, 
+                                           out_channels=self.ch, 
+                                           dropout=dropout))
+            self.down_atten.append(AttnBlock(self.ch))
+        
+        self.up_res = nn.ModuleList()
+        self.up_atten = nn.ModuleList()
+        skip_in = self.ch
+        for i in range(self.num_res_blocks//2):
+            self.up_res.append(ResnetBlock(in_channels=self.ch+skip_in, 
+                                           out_channels=self.ch, 
+                                           dropout=dropout))
+            self.up_atten.append(AttnBlock(self.ch))
+        
         # end
-        self.norm_out = Normalize(block_in)
-        self.conv_out = torch.nn.Conv2d(block_in,
+        self.norm_out = Normalize(self.ch)
+        self.conv_out = torch.nn.Conv2d(self.ch,
                                         out_ch,
                                         kernel_size=3,
                                         stride=1,
@@ -279,30 +232,15 @@ class _UnetBlock(nn.Module):
         assert x.shape[2] == x.shape[3] == self.resolution
         # downsampling
         hs = [self.conv_in(x)]
-        for i_level in range(self.num_resolutions):
-            for i_block in range(self.num_res_blocks):
-                h = self.down[i_level].block[i_block](hs[-1])
-                if len(self.down[i_level].attn) > 0:
-                    h = self.down[i_level].attn[i_block](h)
-                hs.append(h)
-            if i_level != self.num_resolutions-1:
-                hs.append(self.down[i_level].downsample(hs[-1]))
-
-        # middle
-        h = hs[-1]
-        h = self.mid.block_1(h)
-        h = self.mid.attn_1(h)
-        h = self.mid.block_2(h)
+        for i in range(self.num_res_blocks//2):
+            h = self.down_res[i](hs[-1])
+            h = self.down_atten[i](h)
+            hs.append(h)
 
         # upsampling
-        for i_level in reversed(range(self.num_resolutions)):
-            for i_block in range(self.num_res_blocks+1):
-                h = self.up[i_level].block[i_block](
-                    torch.cat([h, hs.pop()], dim=1))
-                if len(self.up[i_level].attn) > 0:
-                    h = self.up[i_level].attn[i_block](h)
-            if i_level != 0:
-                h = self.up[i_level].upsample(h)
+        for i in range(self.num_res_blocks//2):
+            h = self.up_res[i](torch.cat([h, hs.pop()], dim=1))    
+            h = self.up_atten[i](h)
 
         # end
         h = self.norm_out(h)
