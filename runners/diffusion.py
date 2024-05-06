@@ -4,7 +4,7 @@ import logging
 import numpy as np
 import torch
 
-from ddim.models.model import Model
+from models.model import Model
 from models.model_ema import ModelEma
 from functions import get_optimizer
 from datasets import data_transform, inverse_data_transform
