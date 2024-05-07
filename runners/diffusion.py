@@ -365,7 +365,14 @@ class Diffusion(object):
                         states.append(ema.state_dict())
 
                     torch.save(states, os.path.join(self.args.log_path, "ckpt.pth"))
-                 
+                
+
+                if hasattr(self.config.training, "fid_freq") and \
+                    self.config.training.fid_freq > 0 and  \
+                        step % self.config.training.fid_freq == 0:
+                    fid = self.fid(ema.module, verbose=False)
+                    tb_logger.add_scalar("fid", fid, global_step=step)
+
                 data_start = time.time()
     
     def sample(self):
@@ -434,10 +441,11 @@ class Diffusion(object):
             save_image(x0, os.path.join(self.args.image_folder, f"x0.png"), nrow=16)
             # save_image(x, os.path.join(self.args.image_folder, f"x.png"), nrow=16)
 
-    def fid(self):
-        model, ema = self.create_model()
-        if not self.args.model:
-            model = ema.module
+    def fid(self, model=None, verbose=True):
+        if model is None:
+            model, ema = self.create_model()
+            if not self.args.model:
+                model = ema.module
         model.eval()
         config = self.config.eval
         with torch.no_grad():
@@ -454,8 +462,11 @@ class Diffusion(object):
             images, config.fid_cache, num_images=config.num_images,
             use_torch=config.fid_use_torch, verbose=True)
         
-        model_name = "Model" if self.args.model else "Model(EMA)"
-        print(f"{model_name}: IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
+        if verbose:
+            model_name = "Model" if self.args.model else "Model(EMA)"
+            print(f"{model_name}: IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
+        model.train()
+        return FID
 
     def fid2(self):
         _, ema = self.create_model()
