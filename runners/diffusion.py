@@ -90,6 +90,11 @@ class Diffusion(L.LightningModule):
                 path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
                 self.sample_image(self.model, path2)
             
+            if hasattr(self.config.training, "fid_freq") and \
+                self.config.training.fid_freq > 0 and \
+                    self.global_step % self.config.training.fid_freq == 0:
+                fid = self.fid(self.ema.module, verbose=False)
+                self.log("fid", fid)
 
     def training_step(self, batch, batch_idx):
         seq = self.seq[1:]
@@ -184,10 +189,11 @@ class Diffusion(L.LightningModule):
         x = inverse_data_transform(config, x)
         save_image(x, path, nrow=16)
 
-    def fid(self):
-        model = self.model
-        if not self.args.model:
-            model = self.ema.module
+    def fid(self, model=None, verbose=True):
+        if model is None:
+            model = self.model
+            if not self.args.model:
+                model = self.ema.module
         model.eval()
         config = self.config.eval
         with torch.no_grad():
@@ -204,6 +210,8 @@ class Diffusion(L.LightningModule):
             images, config.fid_cache, num_images=config.num_images,
             use_torch=config.fid_use_torch, verbose=True)
         
-        model_name = "Model" if self.args.model else "Model(EMA)"
-        print(f"{model_name}: IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
-        
+        if verbose:
+            model_name = "Model" if self.args.model else "Model(EMA)"
+            print(f"{model_name}: IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
+        model.train()
+        return FID
