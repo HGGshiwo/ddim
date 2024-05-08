@@ -241,7 +241,8 @@ if __name__ == "__main__":
             gradient_clip_val=config.optim.grad_clip,
             callbacks=callbacks,
             log_every_n_steps=1,
-            val_check_interval=config.training.fid_freq
+            val_check_interval=config.training.fid_freq,
+            check_val_every_n_epoch=None
         )
         
         if args.resume_training or args.fid:

@@ -50,6 +50,8 @@ class FidMetrics(Metric):
 
         fid_score = calculate_frechet_distance(m1, s1, self.m2, self.s2, use_torch=False)
         del self.model
+        self.fid_acts = []
+        self.is_probs = []
         return fid_score
     
     def reset(self):
@@ -155,9 +157,9 @@ class Diffusion(L.LightningModule):
             
             if self.local_rank == 0:
                 self.log(f"layer{t}/loss", loss)
-                logging.info(
-                    f"epoch: {self.current_epoch} layer: {t} step: {self.global_step}, loss: {loss.item()}"
-                )
+                # logging.info(
+                #     f"epoch: {self.current_epoch} layer: {t} step: {self.global_step}, loss: {loss.item()}"
+                # )
                 
             losses.append(loss)
         
