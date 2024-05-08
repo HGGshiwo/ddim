@@ -13,11 +13,11 @@ from datasets import get_dataset
 import torch.utils.data as data
 from lightning.pytorch import loggers as pl_loggers
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint
-from lightning.pytorch.utilities.rank_zero import rank_zero_only
 
 from runners.diffusion import Diffusion
 
 torch.set_printoptions(sci_mode=False)
+torch.set_float32_matmul_precision('high')
 
 is_zero_rank = (os.getenv("LOCAL_RANK", '0') == '0')
 
@@ -47,7 +47,6 @@ def parse_args_and_config():
         default="info",
         help="Verbose level: info | debug | warning | critical",
     )
-    parser.add_argument("--loss", action="store_true", help="Whether to test the model")
     parser.add_argument("--fid", action="store_true", help="Whether to test the model")
     parser.add_argument(
         "--sample",
@@ -89,7 +88,7 @@ def parse_args_and_config():
     args = parser.parse_args()
     
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu  
-    args.train = not args.sample and not args.loss and not args.fid 
+    args.train = not args.sample and not args.fid 
     
     # parse config file
     with open(args.config, "r") as f:
@@ -154,12 +153,6 @@ def parse_args_and_config():
         )
         if not os.path.exists(args.image_folder):
             os.makedirs(args.image_folder)
-    
-    if args.fid and hasattr(new_config.sampling, "ckpt"):
-        if not os.path.exists(args.log_path):
-            os.makedirs(args.log_path)
-            with open(os.path.join(args.log_path, "config.yml"), "w") as f:
-                yaml.dump(config, f, default_flow_style=False)
 
     # set random seed
     torch.manual_seed(args.seed)
@@ -180,7 +173,17 @@ def dict2namespace(config):
             new_value = value
         setattr(namespace, key, new_value)
     return namespace
-               
+
+class RandnDataset(data.Dataset):
+    def __init__(self, num_images):
+        self.num_images = num_images
+
+    def __len__(self):
+        return self.num_images
+    
+    def __getitem__(self, idx):
+        return torch.randn(3, 32, 32), 0
+
 if __name__ == "__main__":
     args, config = parse_args_and_config()
     if is_zero_rank:
@@ -193,12 +196,17 @@ if __name__ == "__main__":
             runner = Diffusion.load_from_checkpoint(f"{args.log_path}/ckpt.pth", args=args, config=config)
             
         if args.sample:
-            runner.sample()
-        elif args.loss:
-            runner.loss()
-        elif args.fid:
-            runner.fid()
-        else:                
+            runner.sample() 
+            exit()
+
+        else: # fid or train
+            test_loader = data.DataLoader(
+                RandnDataset(config.eval.num_images), 
+                batch_size=config.eval.batch_size, 
+                num_workers=config.data.num_workers
+            )
+        callbacks = []
+        if args.train:    
             dataset, _ = get_dataset(args, config)
             train_loader = data.DataLoader(
                 dataset,
@@ -206,35 +214,46 @@ if __name__ == "__main__":
                 shuffle=True,
                 num_workers=config.data.num_workers,
             )
-            
+
             if is_zero_rank:
                 tb_logger = pl_loggers.TensorBoardLogger(save_dir=args.exp, name="tensorboard", version=args.doc)
             else:
-                tb_logger = None 
-                
+                tb_logger = False 
+            
             checkpoint_callback = ModelCheckpoint(
                 dirpath=args.log_path, 
                 filename="ckpt", 
                 every_n_train_steps=config.training.snapshot_freq
             )
             checkpoint_callback.FILE_EXTENSION = '.pth'
-            trainer = L.Trainer(
-                accelerator="gpu", 
-                devices="auto", 
-                default_root_dir=args.log_path, 
-                max_epochs=config.training.n_epochs,
-                strategy='ddp_find_unused_parameters_true',
-                enable_progress_bar=False,
-                logger=tb_logger,
-                gradient_clip_val=config.optim.grad_clip,
-                callbacks=[checkpoint_callback],
-                log_every_n_steps=1,
-            )
-            if args.resume_training:
-                ckpt = f"{args.log_path}/ckpt.pth"
-            else:
-                ckpt = None
-            trainer.fit(model=runner, train_dataloaders=train_loader, ckpt_path=ckpt)
-            
+            callbacks.append(checkpoint_callback)
+        else:
+            tb_logger = False
+
+        trainer = L.Trainer(
+            accelerator="gpu", 
+            devices="auto", 
+            default_root_dir=args.log_path, 
+            max_epochs=config.training.n_epochs,
+            strategy='ddp_find_unused_parameters_true',
+            # enable_progress_bar=not args.train,
+            logger=tb_logger,
+            gradient_clip_val=config.optim.grad_clip,
+            callbacks=callbacks,
+            log_every_n_steps=1,
+            val_check_interval=config.training.fid_freq
+        )
+        
+        if args.resume_training or args.fid:
+            ckpt = f"{args.log_path}/ckpt.pth"
+        else:
+            ckpt = None
+
+        if args.train:
+            trainer.fit(model=runner, train_dataloaders=train_loader, ckpt_path=ckpt, 
+                        val_dataloaders=test_loader)
+        else:
+            trainer.validate(model=runner, dataloaders=test_loader)
+
     except Exception:
         logging.error(traceback.format_exc())

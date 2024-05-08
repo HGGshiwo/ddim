@@ -12,47 +12,62 @@ from score.both import get_inception_and_fid_score
 from torchvision.utils import save_image
 from tqdm import trange
 import lightning as L
+from torchmetrics.metric import Metric
+from score.inception import InceptionV3
+from score.fid import calculate_frechet_distance, torch_cov
 
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
-    def sigmoid(x):
-        return 1 / (np.exp(-x) + 1)
-
-    if beta_schedule == "quad":
-        betas = (
-            np.linspace(
-                beta_start ** 0.5,
-                beta_end ** 0.5,
-                num_diffusion_timesteps,
-                dtype=np.float64,
-            )
-            ** 2
-        )
-    elif beta_schedule == "linear":
-        betas = np.linspace(
-            beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
-        )
-    elif beta_schedule == "const":
-        betas = beta_end * np.ones(num_diffusion_timesteps, dtype=np.float64)
-    elif beta_schedule == "jsd":  # 1/T, 1/(T-1), 1/(T-2), ..., 1
-        betas = 1.0 / np.linspace(
-            num_diffusion_timesteps, 1, num_diffusion_timesteps, dtype=np.float64
-        )
-    elif beta_schedule == "sigmoid":
-        betas = np.linspace(-6, 6, num_diffusion_timesteps)
-        betas = sigmoid(betas) * (beta_end - beta_start) + beta_start
-    else:
-        raise NotImplementedError(beta_schedule)
+    betas = np.linspace(
+        beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
+    )
     assert betas.shape == (num_diffusion_timesteps,)
     return betas
 
+class FidMetrics(Metric):
+    def __init__(self, fid_cache, verbose=True):
+        super().__init__()
+        self.verbose = verbose
+        self.add_state("fid_acts", default=[], dist_reduce_fx="cat")
+        self.add_state("is_probs", default=[], dist_reduce_fx="cat")
 
+        f = np.load(fid_cache)
+        m2, s2 = f['mu'][:], f['sigma'][:]
+        f.close()
+
+        self.m2 = m2.astype(np.float32)
+        self.s2 = s2.astype(np.float32)
+
+    
+    def update(self, batch_images):
+        batch_images = (batch_images + 1) / 2
+        pred = self.model(batch_images)
+        self.fid_acts.append(pred[0].view(-1, 2048))
+        self.is_probs.append(pred[1])
+    
+    def compute(self):
+        m1 = torch.mean(self.fid_acts, axis=0).cpu().numpy()
+        s1 = torch_cov(self.fid_acts, rowvar=False).cpu().numpy()
+
+        fid_score = calculate_frechet_distance(m1, s1, self.m2, self.s2, use_torch=False)
+        del self.model
+        return fid_score
+    
+    def reset(self):
+        block_idx1 = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
+        block_idx2 = InceptionV3.BLOCK_INDEX_BY_DIM['prob']
+        self.model = InceptionV3([block_idx1, block_idx2])
+        self.model.to(self.device)
+        self.model.eval()
+
+    
 class Diffusion(L.LightningModule):
     def __init__(self, args, config):
         super().__init__()
         self.save_hyperparameters()
         self.args = args
         self.config = config
-        
+        self.fid_metric = FidMetrics(fid_cache=self.config.eval.fid_cache)
+
         betas = get_beta_schedule(
             beta_schedule=config.diffusion.beta_schedule,
             beta_start=config.diffusion.beta_start,
@@ -89,12 +104,6 @@ class Diffusion(L.LightningModule):
             if self.global_step % self.config.training.sample_freq == 0:
                 path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
                 self.sample_image(self.model, path2)
-            
-            if hasattr(self.config.training, "fid_freq") and \
-                self.config.training.fid_freq > 0 and \
-                    self.global_step % self.config.training.fid_freq == 0:
-                fid = self.fid(self.ema.module, verbose=False)
-                self.log("fid", fid)
 
     def training_step(self, batch, batch_idx):
         seq = self.seq[1:]
@@ -144,7 +153,6 @@ class Diffusion(L.LightningModule):
 
             loss = loss.square().sum((1,2,3)).mean(dim=0)
             
-            # 只记录0号的损失
             if self.local_rank == 0:
                 self.log(f"layer{t}/loss", loss)
                 logging.info(
@@ -159,8 +167,23 @@ class Diffusion(L.LightningModule):
         loss_sum = loss_sum.sum()
         
         return loss_sum
-
     
+    def on_validation_epoch_start(self):
+        self.fid_metric.reset()
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        out = self.ema.module.sample(x)
+        self.fid_metric.update(out)
+
+    def on_validation_epoch_end(self):
+        FID = self.fid_metric.compute()
+        if self.local_rank == 0:    
+            if self.args.train:
+                self.log("fid", FID)
+            else:
+                logging.info(f"Model(EMA): FID:{FID:7.3f}")
+
     def sample(self):
         model = self.model
         if not self.args.model:
@@ -173,7 +196,7 @@ class Diffusion(L.LightningModule):
         config = self.config
         
         x = torch.randn(
-            config.sampling.batch_size,
+            config.eval.batch_size,
             config.data.channels,
             config.data.image_size,
             config.data.image_size,
@@ -188,30 +211,3 @@ class Diffusion(L.LightningModule):
             
         x = inverse_data_transform(config, x)
         save_image(x, path, nrow=16)
-
-    def fid(self, model=None, verbose=True):
-        if model is None:
-            model = self.model
-            if not self.args.model:
-                model = self.ema.module
-        model.eval()
-        config = self.config.eval
-        with torch.no_grad():
-            images = []
-            desc = "generating images"
-            for i in trange(0, config.num_images, config.batch_size, desc=desc):
-                batch_size = min(config.batch_size, config.num_images - i)
-                x_T = torch.randn((batch_size, 3, self.config.data.image_size, self.config.data.image_size), device=self.device)
-                batch_images = model.sample(x_T).cpu()
-                images.append((batch_images + 1) / 2)
-            images = torch.cat(images, dim=0).numpy()
-    
-        (IS, IS_std), FID = get_inception_and_fid_score(
-            images, config.fid_cache, num_images=config.num_images,
-            use_torch=config.fid_use_torch, verbose=True)
-        
-        if verbose:
-            model_name = "Model" if self.args.model else "Model(EMA)"
-            print(f"{model_name}: IS:%6.3f(%.3f), FID:%7.3f" % (IS, IS_std, FID))
-        model.train()
-        return FID

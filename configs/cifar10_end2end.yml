@@ -40,20 +40,16 @@ training:
     n_iters: 5000000
     snapshot_freq: 500
     sample_freq: 500
-    fid_freq: 5000
+    fid_freq: 10
     # use_ckpt: /home/bingwenzhang/ddim/exp/logs/2024-03-26-22-31-35/ckpt.pth
     use_true_x: true
     use_adv_loss: false
     use_loss_weight: true
 
-sampling:
-    batch_size: 256
-
 eval:
     num_images: 50000
-    batch_size: 128
+    batch_size: 256
     fid_cache: /home/bingwenzhang/ddim/stats/cifar10.train.npz
-    fid_use_torch: false
 
 optim:
     weight_decay: 0.000
