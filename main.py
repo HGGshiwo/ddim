@@ -242,7 +242,8 @@ if __name__ == "__main__":
             callbacks=callbacks,
             log_every_n_steps=1,
             val_check_interval=config.training.fid_freq,
-            check_val_every_n_epoch=None
+            check_val_every_n_epoch=None,
+            num_sanity_val_steps=0,
         )
         
         if args.resume_training or args.fid:

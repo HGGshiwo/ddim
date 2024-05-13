@@ -37,7 +37,6 @@ class FidMetrics(Metric):
         self.m2 = m2.astype(np.float32)
         self.s2 = s2.astype(np.float32)
 
-    
     def update(self, batch_images):
         batch_images = (batch_images + 1) / 2
         pred = self.model(batch_images)
@@ -50,8 +49,9 @@ class FidMetrics(Metric):
 
         fid_score = calculate_frechet_distance(m1, s1, self.m2, self.s2, use_torch=False)
         del self.model
-        self.fid_acts = []
-        self.is_probs = []
+        setattr(self, 'fid_acts', [])
+        setattr(self, 'is_probs', [])
+        torch.cuda.empty_cache()  
         return fid_score
     
     def reset(self):
@@ -65,7 +65,7 @@ class FidMetrics(Metric):
 class Diffusion(L.LightningModule):
     def __init__(self, args, config):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(logger=False)
         self.args = args
         self.config = config
         self.fid_metric = FidMetrics(fid_cache=self.config.eval.fid_cache)
@@ -184,7 +184,12 @@ class Diffusion(L.LightningModule):
             if self.args.train:
                 self.log("fid", FID)
             else:
-                logging.info(f"Model(EMA): FID:{FID:7.3f}")
+                self.val_fid = FID
+                
+    def on_validation_end(self):
+        if self.local_rank == 0:
+            if not self.args.train:
+                logging.info(f"Model(EMA): FID:{self.val_fid:7.3f}")
 
     def sample(self):
         model = self.model
