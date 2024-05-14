@@ -168,24 +168,20 @@ class Diffusion(L.LightningModule):
         return loss_sum
     
     def on_validation_epoch_start(self):
-        print(f'on_validation_epoch_start: {torch.cuda.memory_allocated()}')
         self.fid_metric.reset_model()
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         out = self.ema.module.sample(x)
         self.fid_metric.update(out)
-        print(f"validation_batch: {torch.cuda.memory_allocated()}")
 
     def on_validation_epoch_end(self):
-        print(f"on_validation_epoch_end: {torch.cuda.memory_allocated()}")
         FID = self.fid_metric.compute()
         if self.local_rank == 0:    
             if self.args.train:
                 self.log("fid", FID)
             else:
                 self.val_fid = FID
-        print(f'on_validation_epoch_end2: {torch.cuda.memory_allocated()}')
                 
     def on_validation_end(self):
         if self.local_rank == 0:
