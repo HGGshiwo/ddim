@@ -103,7 +103,6 @@ class Diffusion(L.LightningModule):
             if self.global_step % self.config.training.sample_freq == 0:
                 path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
                 self.sample_image(self.model, path2)
-        print(f"train: {torch.cuda.memory_allocated()}")
 
     def training_step(self, batch, batch_idx):
         seq = self.seq[1:]
