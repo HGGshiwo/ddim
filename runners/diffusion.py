@@ -28,7 +28,6 @@ class FidMetrics(Metric):
         super().__init__()
         self.verbose = verbose
         self.add_state("fid_acts", default=[], dist_reduce_fx="cat")
-        self.add_state("is_probs", default=[], dist_reduce_fx="cat")
 
         f = np.load(fid_cache)
         m2, s2 = f['mu'][:], f['sigma'][:]
@@ -36,32 +35,30 @@ class FidMetrics(Metric):
 
         self.m2 = m2.astype(np.float32)
         self.s2 = s2.astype(np.float32)
+        block_idx1 = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
+        block_idx2 = InceptionV3.BLOCK_INDEX_BY_DIM['prob']
+        self.model = [InceptionV3([block_idx1, block_idx2])]
+        self.model[0].eval()
 
     def update(self, batch_images):
         batch_images = (batch_images + 1) / 2
-        pred = self.model(batch_images)
+        
+        pred = self.model[0](batch_images)
         self.fid_acts.append(pred[0].view(-1, 2048))
-        self.is_probs.append(pred[1])
+        pass
     
     def compute(self):
+        self.model[0].cpu()
         m1 = torch.mean(self.fid_acts, axis=0).cpu().numpy()
         s1 = torch_cov(self.fid_acts, rowvar=False).cpu().numpy()
 
         fid_score = calculate_frechet_distance(m1, s1, self.m2, self.s2, use_torch=False)
-        del self.model
-        setattr(self, 'fid_acts', [])
-        setattr(self, 'is_probs', [])
-        torch.cuda.empty_cache()  
-        return fid_score
+        super().reset() # 需要调用父类的reset才可以
+        return fid_score    
     
-    def reset(self):
-        block_idx1 = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
-        block_idx2 = InceptionV3.BLOCK_INDEX_BY_DIM['prob']
-        self.model = InceptionV3([block_idx1, block_idx2])
-        self.model.to(self.device)
-        self.model.eval()
+    def reset_model(self):
+        self.model[0].to(self.device)
 
-    
 class Diffusion(L.LightningModule):
     def __init__(self, args, config):
         super().__init__()
@@ -106,6 +103,7 @@ class Diffusion(L.LightningModule):
             if self.global_step % self.config.training.sample_freq == 0:
                 path2 = os.path.join(self.args.log_path, '%d_model.png' % self.global_step)
                 self.sample_image(self.model, path2)
+        print(f"train: {torch.cuda.memory_allocated()}")
 
     def training_step(self, batch, batch_idx):
         seq = self.seq[1:]
@@ -171,20 +169,24 @@ class Diffusion(L.LightningModule):
         return loss_sum
     
     def on_validation_epoch_start(self):
-        self.fid_metric.reset()
+        print(f'on_validation_epoch_start: {torch.cuda.memory_allocated()}')
+        self.fid_metric.reset_model()
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         out = self.ema.module.sample(x)
         self.fid_metric.update(out)
+        print(f"validation_batch: {torch.cuda.memory_allocated()}")
 
     def on_validation_epoch_end(self):
+        print(f"on_validation_epoch_end: {torch.cuda.memory_allocated()}")
         FID = self.fid_metric.compute()
         if self.local_rank == 0:    
             if self.args.train:
                 self.log("fid", FID)
             else:
                 self.val_fid = FID
+        print(f'on_validation_epoch_end2: {torch.cuda.memory_allocated()}')
                 
     def on_validation_end(self):
         if self.local_rank == 0:
