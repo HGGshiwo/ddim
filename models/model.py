@@ -92,7 +92,7 @@ class AttnBlock(nn.Module):
                                         stride=1,
                                         padding=0)
 
-    def forward(self, x, kv=None):
+    def forward(self, x):
         h_ = x
         h_ = self.norm(h_)
         
@@ -263,6 +263,9 @@ class UnetBlock(_UnetBlock):
         else:
             x = self.sample_block(et, true_x, i, j)
         return x
+    
+    def _forward(self, x):
+        return super().forward(x)
 
 
 class SampleBlock(nn.Module):
@@ -319,17 +322,33 @@ class Model(nn.Module):
         })
         self.seq = seq
         self.betas = betas
+        self.use_mean = config.training.use_mean
+        self.detach = config.training.detach
 
     def __getitem__(self, i):
         return self.models[str(i)]
     
     def forward(self, x, true_x_seq=None):
         outputs = []
-        for k, (t, t_next) in enumerate(zip(reversed(self.seq[1:]), reversed(self.seq[:-1]))):     
+        ets = []
+        _x = None
+        for k, (t, t_next) in enumerate(zip(reversed(self.seq[1:]), reversed(self.seq[:-1]))):    
             if true_x_seq is not None:
-                x = self.models[str(t)](x, t, t_next, true_x_seq[k])    
+                if self.use_mean:
+                    if _x is not None:
+                        x = _x
+                    et = self.models[str(t)]._forward(x)
+                    ets.append(et)
+                    _et = torch.stack(ets, dim=1).mean(dim=1)
+                    x = self.models[str(t)].sample_block(et, true_x_seq[k], t, t_next)
+                    _x = self.models[str(t)].sample_block(_et, true_x_seq[k], t, t_next)
+                    if self.detach:
+                        ets[-1].detach()    
+                else:
+                    x = self.models[str(t)](x, t, t_next, true_x_seq[k])    
             else:
                 x = self.models[str(t)](x, t, t_next)                
+            
             outputs.append(x)
         return outputs
 
