@@ -17,7 +17,7 @@ model:
     in_channels: 3
     out_ch: 3
     alpha: 8
-    beta: 4
+    beta: 8
     dropout: 0.1
     var_type: fixedlarge
     ema_rate: 0.9999
@@ -35,7 +35,7 @@ diffusion:
     learn_alpha: false
 
 training:
-    batch_size: 8
+    batch_size: 4
     n_epochs: 10000
     n_iters: 5000000
     snapshot_freq: 500
