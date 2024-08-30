@@ -102,12 +102,12 @@ class Diffusion(object):
         skip = self.num_timesteps // self.config.diffusion.num_block
         self.seq = range(0, self.num_timesteps, skip)
         at = (1-self.betas).cumprod(dim=0)
-        if self.config.training.train_type == "end2end":
-            t = np.array(list(reversed(self.seq[1:])))
-            # self.loss_weight = 3.18e-06*np.exp(0.71*(t/50+1.75))+ 0.010
-            # self.loss_weight = torch.zeros(len(self.seq[1:]))
-            # self.loss_weight[-1] = 1
-            self.loss_weight = 1/at[t].view(-1, 1, 1, 1)
+
+        t = np.array(list(reversed(self.seq[1:])))
+        # self.loss_weight = 3.18e-06*np.exp(0.71*(t/50+1.75))+ 0.010
+        # self.loss_weight = torch.zeros(len(self.seq[1:]))
+        # self.loss_weight[-1] = 1
+        self.loss_weight = 1/at[t].view(-1, 1, 1, 1)
 
     def get_states(self):
         if hasattr(self.config.sampling, "ckpt"):
@@ -503,6 +503,7 @@ class Diffusion(object):
                     img_id += 1
 
     def loss2(self):
+        # 非pred_mean
         args, config = self.args, self.config
         dataset, test_dataset = get_dataset(args, config)
         train_loader = data.DataLoader(
@@ -517,19 +518,21 @@ class Diffusion(object):
         t = 0
         skip = self.num_timesteps // config.diffusion.num_block
         seq = range(0, self.num_timesteps, skip)
-        t_index = 0
+        t_index = 1
         for i, (x, y) in enumerate(train_loader):
             if t_index >= len(seq):
                 break
             t = seq[t_index]
+            weight = self.loss_weight[len(seq)-t_index-1]
             x = x.to(self.device)
             x = data_transform(self.config, x)
             x_T = torch.randn_like(x)
             loss = layer_loss(model, x, t, x_T, self.betas)
-            print(f"layer {t_index} loss: {loss.item()}")
+            print(f"layer {t_index} loss: {loss.item()}, gamma*L: {(weight*loss).item()}")
             t_index += 1
 
     def loss(self):
+        # pred_mean可以使用这个
         args, config = self.args, self.config
         dataset, test_dataset = get_dataset(args, config)
         train_loader = data.DataLoader(

@@ -185,7 +185,7 @@ def main():
         if args.sample:
             runner.sample2()
         elif args.loss:
-            runner.loss()
+            runner.loss2()
         elif args.fid:
             runner.fid()
         else:

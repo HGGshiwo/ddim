@@ -349,7 +349,7 @@ class UnetBlock(_UnetBlock):
 
     def forward(self, x, t, last_t=None, true_x=None):
         et = self.forward_with_shuffle(x, true_x)
-        if self.pred_mean:
+        if self.pred_mean and last_t is not None:
             # layer t 是输入t, 输出t-1
             et = self.sample_block(et, x, t, last_t)
         return et
