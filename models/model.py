@@ -332,7 +332,7 @@ class UnetBlock(_UnetBlock):
         self.output_size = config.model.output_size
         self.in_ch = config.model.in_channels
         self.out_ch = config.model.out_ch
-        self.detach = config.training.detach
+        self.detach = getattr(config.training, 'detach', False)
         
         if self.in_ch != 3:
             self.pixel_unshuffle = nn.PixelUnshuffle(2)
