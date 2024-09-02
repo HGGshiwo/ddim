@@ -25,28 +25,18 @@ model:
   - 16
   block_type: UnetBlock
   ch_mult:
-  - num: 1
-    value:
-    - 1
-    - 2
-  - num: 8
-    value:
-    - 1
-    - 2
-    - 2
-    - 2
-  - num: 11
+  - num: 20
     value:
     - 1
     - 2
   ch_num:
-  - num: 1
-    value: 64
-  - num: 8
-    value: 128
-  - num: 1
+  - num: 5
     value: 64
   - num: 5
+    value: 32
+  - num: 4
+    value: 8
+  - num: 1
     value: 32
   - num: 5
     value: 16
@@ -74,14 +64,10 @@ optim:
 sampling:
   batch_size: 256
   ckpt:
-  - num: 1
+  - num: 14
     value: 2024-03-15-13-50-53
-  - num: 8
-    value: 2024-03-06-16-41-41
-  - num: 1
-    value: 2024-03-15-13-48-14
-  - num: 10
-    value: 2024-03-15-14-04-46
+  - num: 6
+    value: 2024-08-31-19-58-30
 training:
   batch_size: 64
   n_epochs: 10000

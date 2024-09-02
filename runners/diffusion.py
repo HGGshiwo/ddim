@@ -528,7 +528,7 @@ class Diffusion(object):
             x = data_transform(self.config, x)
             x_T = torch.randn_like(x)
             loss = layer_loss(model, x, t, x_T, self.betas)
-            print(f"layer {t_index} loss: {loss.item()}, gamma*L: {(weight*loss).item()}")
+            print(f"layer {t_index} loss: {loss.item()}, gamma*L: {(weight*loss).item()}, weight: {weight.item()}")
             t_index += 1
 
     def loss(self):
