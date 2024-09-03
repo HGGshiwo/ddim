@@ -327,6 +327,9 @@ class UnetBlock(_UnetBlock):
         return x
 
 
+    def _forward(self, x):
+        return super().forward(x)
+    
 class SampleBlock(nn.Module):
     def __init__(self, betas, learn_alpha) -> None:
         super().__init__()

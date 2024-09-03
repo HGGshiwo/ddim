@@ -315,7 +315,11 @@ class Model(nn.Module):
                 setattr(new_config.model, key, value[i])
             configs.append(new_config)
 
-        block_type = globals()[config.model.block_type]  
+        block_type = UnetBlock
+        if not hasattr(config.model, "alpha"):  
+            from .model_old import UnetBlock as UnetBlockOld
+            block_type = UnetBlockOld
+        
         self.models = nn.ModuleDict({
             str(key): block_type(config, betas) 
             for key, config in zip(seq, configs)
@@ -324,6 +328,7 @@ class Model(nn.Module):
         self.betas = betas
         self.use_mean = config.training.use_mean
         self.detach = config.training.detach
+        self.first_only = getattr(config.training, "first_only", False)
 
     def __getitem__(self, i):
         return self.models[str(i)]
@@ -338,7 +343,8 @@ class Model(nn.Module):
                     if _x is not None:
                         x = _x
                     et = self.models[str(t)]._forward(x)
-                    ets.append(et)
+                    if not self.first_only or k == 0:
+                        ets.append(et)
                     _et = torch.stack(ets, dim=1).mean(dim=1)
                     x = self.models[str(t)].sample_block(et, true_x_seq[k], t, t_next)
                     _x = self.models[str(t)].sample_block(_et, true_x_seq[k], t, t_next)
