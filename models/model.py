@@ -346,8 +346,10 @@ class Model(nn.Module):
                     if not self.first_only or k == 0:
                         ets.append(et)
                     _et = torch.stack(ets, dim=1).mean(dim=1)
-                    x = self.models[str(t)].sample_block(et, true_x_seq[k], t, t_next)
-                    _x = self.models[str(t)].sample_block(_et, true_x_seq[k], t, t_next)
+                    true_x = true_x_seq[k]
+                    true_x = true_x.unsqueeze(0).expand(2, -1, -1, -1, -1).reshape(-1, *true_x.shape[1:])
+                    x = self.models[str(t)].sample_block(torch.cat([et, _et]), true_x, t, t_next)
+                    x, _x = x.split(x.size(0)//2)
                     if self.detach:
                         ets[-1].detach()    
                 else:

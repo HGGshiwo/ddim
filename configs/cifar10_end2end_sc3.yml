@@ -14,7 +14,6 @@ model:
     use_time_embed: False
     type: "simple"
     attn_resolutions: [16]
-    block_type: "UnetBlock"
     in_channels: 3
     out_ch: 3
     dropout: 0.1
@@ -32,11 +31,11 @@ model:
     ch_num:
       - value: 128
         num: 5
-      - value: 64
+      - value: 128
+        num: 5
+      - value: 32
         num: 5
       - value: 16
-        num: 5
-      - value: 8
         num: 5
 
 diffusion:
