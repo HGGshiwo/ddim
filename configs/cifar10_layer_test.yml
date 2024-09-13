@@ -1,0 +1,72 @@
+data:
+  channels: 3
+  dataset: CIFAR10
+  gaussian_dequantization: false
+  image_size: 32
+  logit_transform: false
+  num_workers: 4
+  random_flip: true
+  rescaled: true
+  uniform_dequantization: false
+diffusion:
+  beta_end: 0.02
+  beta_schedule: linear
+  beta_start: 0.0001
+  learn_alpha: false
+  num_block: 20
+  num_diffusion_timesteps: 1000
+eval:
+  batch_size: 128
+  fid_cache: /home/bingwenzhang/ddim/stats/cifar10.train.npz
+  fid_use_torch: false
+  num_images: 50000
+model:
+  attn_resolutions:
+  - 16
+  block_type: UnetBlock
+  ch_mult: [1, 2, 2, 2]
+  ch_num:
+  - num: 1
+    value: 128
+  - num: 1
+    value: 16
+  - num: 18
+    value: 128
+  dropout: 0.1
+  ema: true
+  ema_rate: 0.9999
+  in_channels: 3
+  input_size: 32
+  num_res_blocks: 2
+  out_ch: 3
+  output_size: 32
+  resamp_with_conv: true
+  type: simple
+  upsamp_type: None
+  use_time_embed: false
+  var_type: fixedlarge
+optim:
+  amsgrad: false
+  beta1: 0.9
+  eps: 1.0e-08
+  grad_clip: 1.0
+  lr: 0.0002
+  optimizer: Adam
+  weight_decay: 0.0
+sampling:
+  batch_size: 256
+  ckpt:
+  - num: 1
+    value: 2024-03-06-16-41-41
+  - num: 1
+    value: 2024-09-12-21-19-10
+  - num: 18
+    value: 2024-03-06-16-41-41
+training:
+  batch_size: 64
+  n_epochs: 10000
+  n_iters: 5000000
+  sample_freq: 5000
+  snapshot_freq: 5000
+  train_type: layer
+use_pretrained: false

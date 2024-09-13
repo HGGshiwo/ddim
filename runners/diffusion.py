@@ -205,7 +205,7 @@ class Diffusion(object):
             step = states[3]
             if self.config.model.ema:
                 ema.load_state_dict(states[4])
-        elif hasattr(self.config.training, "layer"):
+        elif hasattr(self.config.training, "layer") and hasattr(self.config.training, "use_ckpt"):
             states = torch.load(self.config.training.use_ckpt, map_location="cpu")
             def check(k):
                 for i in seq:
