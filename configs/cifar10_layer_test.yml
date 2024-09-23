@@ -28,10 +28,10 @@ model:
   ch_num:
   - num: 1
     value: 128
+  - num: 18
+    value: 128  
   - num: 1
     value: 16
-  - num: 18
-    value: 128
   dropout: 0.1
   ema: true
   ema_rate: 0.9999
@@ -58,10 +58,10 @@ sampling:
   ckpt:
   - num: 1
     value: 2024-03-06-16-41-41
+  - num: 18
+    value: 2024-03-06-16-41-41  
   - num: 1
     value: 2024-09-12-21-19-10
-  - num: 18
-    value: 2024-03-06-16-41-41
 training:
   batch_size: 64
   n_epochs: 10000
